@@ -1,0 +1,74 @@
+[
+  {
+    "name": "ui-click",
+    "seconds": 1,
+    "prompt": "Short crisp wooden button click, a dry close mechanical tap with a soft rounded attack and no reverb tail.",
+    "event": "playClick"
+  },
+  {
+    "name": "ui-select",
+    "seconds": 1,
+    "prompt": "A small glass marble lifted and set down gently, soft high clink with a delicate short ring.",
+    "event": "playSelect"
+  },
+  {
+    "name": "invalid-thud",
+    "seconds": 1,
+    "prompt": "Dull low thud of a wooden block bumping against a padded felt surface, short muted and slightly negative.",
+    "event": "playInvalid"
+  },
+  {
+    "name": "place-frost-1",
+    "seconds": 1,
+    "prompt": "A frosted glass block set firmly onto a glass tabletop, soft clink with a brief crystalline shimmer.",
+    "event": "playPlace"
+  },
+  {
+    "name": "place-frost-2",
+    "seconds": 1,
+    "prompt": "A small glass tile sliding a short distance then clicking into place on a board, gentle bright snap.",
+    "event": "playPlace"
+  },
+  {
+    "name": "place-frost-3",
+    "seconds": 1,
+    "prompt": "A heavy frosted glass block thunk on a wooden table with a faint lingering glass ring.",
+    "event": "playPlace"
+  },
+  {
+    "name": "clear-single",
+    "seconds": 1,
+    "prompt": "Bright single glass chime ping with a light sparkling shimmer tail, clean and rewarding.",
+    "event": "playClear"
+  },
+  {
+    "name": "clear-multi",
+    "seconds": 2,
+    "prompt": "Cascading glass chimes and a rising crystalline sparkle sweep, celebratory shimmering glissando.",
+    "event": "playClear"
+  },
+  {
+    "name": "replenish-chime",
+    "seconds": 1,
+    "prompt": "Three quick soft wooden xylophone notes rising in pitch, gentle friendly and warm.",
+    "event": "playReplenish"
+  },
+  {
+    "name": "win-fanfare",
+    "seconds": 3,
+    "prompt": "Warm triumphant small brass and bell fanfare, a rising major-key flourish ending in a bright sparkle.",
+    "event": "playWin"
+  },
+  {
+    "name": "over-fall",
+    "seconds": 2,
+    "prompt": "Gentle descending marimba phrase falling to a soft low resolve, melancholy but warm and rounded.",
+    "event": "playOver"
+  },
+  {
+    "name": "achievement-ping",
+    "seconds": 1,
+    "prompt": "Bright two-note crystal bell ping with a shimmering high sparkle, small and rewarding.",
+    "event": "playAchievement"
+  }
+]
