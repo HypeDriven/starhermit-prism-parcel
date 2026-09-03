@@ -65,27 +65,19 @@ const platform = {
   serverOffset: 0, // server time minus client time (ms)
   online: false,
 
-  async api(path, opts = {}) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 6000);
-    try {
-      const res = await fetch(path, {
-        ...opts,
-        signal: ctrl.signal,
-        headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }
-      });
-      const body = await res.json().catch(() => ({}));
-      if (res.status === 429) throw Object.assign(new Error('rate-limited'), { code: 'rate-limited' });
-      if (!res.ok) throw Object.assign(new Error(body.error || ('http-' + res.status)), { code: body.error || res.status });
-      return body;
-    } finally { clearTimeout(timer); }
-  },
-
-  /** Synchronize with GET /api/v1/time using round-trip adjustment. */
+  /** Synchronize with GET /api/v1/time using round-trip adjustment.
+   *  This is the only platform route guaranteed to exist when hosted;
+   *  every other hosted feature below is a local no-op so no request
+   *  is ever issued to a route the platform does not serve. */
   async syncTime() {
     try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
       const t0 = Date.now();
-      const r = await this.api('/api/v1/time');
+      const res = await fetch('/api/v1/time', { cache: 'no-store', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error('http-' + res.status);
+      const r = await res.json();
       const t1 = Date.now();
       if (typeof r.now === 'number') {
         this.serverOffset = r.now - (t0 + (t1 - t0) / 2);
@@ -97,18 +89,15 @@ const platform = {
   now() { return Date.now() + this.serverOffset; },
 
   async submitDaily(entry) {
-    try { return await this.api('/api/v1/daily/score', { method: 'POST', body: JSON.stringify(entry) }); }
-    catch (e) { return { ok: false, error: e.message }; }
+    return { ok: false, error: 'offline' };
   },
 
   async dailyBoard(date) {
-    try { return await this.api('/api/v1/daily/leaderboard?date=' + encodeURIComponent(date)); }
-    catch (e) { return { ok: false, entries: [] }; }
+    return { ok: false, entries: [] };
   },
 
   async unlockAchievement(key) {
-    try { await this.api('/api/v1/achievements', { method: 'POST', body: JSON.stringify({ key }) }); }
-    catch (e) { /* offline: kept locally */ }
+    /* kept locally only */
   }
 };
 
