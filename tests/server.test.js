@@ -2,9 +2,15 @@
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { server } from '../server.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { initialState, applyCommand, legalPlacements, pieceById, makeReplay, createRng } from '../src/rules.js';
 import { dailySeed, utcDateStr } from '../src/content.js';
+
+// Isolate durable stores so test submissions never touch the repo's data/.
+process.env.PRISM_PARCEL_DATA_DIR = mkdtempSync(join(tmpdir(), 'prism-parcel-data-'));
+const { server } = await import('../server.js');
 
 let port, base;
 

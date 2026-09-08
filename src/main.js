@@ -64,11 +64,13 @@ function persistProgress() { saveJSON(PROGRESS_KEY, progress); }
 const platform = {
   serverOffset: 0, // server time minus client time (ms)
   online: false,
+  serverApi: false, // true only when /api/v1/health proves our game server is present
 
   /** Synchronize with GET /api/v1/time using round-trip adjustment.
    *  This is the only platform route guaranteed to exist when hosted;
-   *  every other hosted feature below is a local no-op so no request
-   *  is ever issued to a route the platform does not serve. */
+   *  other hosted features stay local no-ops unless probe() confirms
+   *  the authoritative game server is actually serving this origin,
+   *  so no request is ever issued to a route the platform does not serve. */
   async syncTime() {
     try {
       const ctrl = new AbortController();
@@ -86,18 +88,51 @@ const platform = {
     } catch (e) { this.online = false; }
   },
 
+  /** One-shot capability probe: enable server-backed features only when the
+   *  authoritative server (server.js) identifies itself via /api/v1/health. */
+  async probe() {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch('/api/v1/health', { cache: 'no-store', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) return;
+      const h = await res.json();
+      this.serverApi = !!(h && h.ok && typeof h.rulesVersion === 'number');
+    } catch (e) { this.serverApi = false; }
+  },
+
   now() { return Date.now() + this.serverOffset; },
 
   async submitDaily(entry) {
-    return { ok: false, error: 'offline' };
+    if (!this.serverApi) return { ok: false, error: 'offline' };
+    try {
+      const res = await fetch('/api/v1/daily/score', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry)
+      });
+      const body = await res.json().catch(() => null);
+      return body && typeof body === 'object' ? body : { ok: false, error: 'http-' + res.status };
+    } catch (e) { return { ok: false, error: 'offline' }; }
   },
 
   async dailyBoard(date) {
-    return { ok: false, entries: [] };
+    if (!this.serverApi) return { ok: false, entries: [] };
+    try {
+      const res = await fetch('/api/v1/daily/leaderboard?date=' + encodeURIComponent(date), { cache: 'no-store' });
+      if (!res.ok) return { ok: false, entries: [] };
+      return await res.json();
+    } catch (e) { return { ok: false, entries: [] }; }
   },
 
   async unlockAchievement(key) {
-    /* kept locally only */
+    if (!this.serverApi) return; /* kept locally only when offline */
+    try {
+      await fetch('/api/v1/achievements', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, player: 'guest' })
+      });
+    } catch (e) { /* durable delivery retried on next unlock attempt */ }
   }
 };
 
@@ -119,6 +154,8 @@ const session = {
   selectedSlot: null,
   cursor: { row: 0, col: 0 },
   tutorialStep: 0,
+  maxCombo: 0,
+  maxLines: 0,
   over: false
 };
 
@@ -136,6 +173,7 @@ let liveTimer = 0;
 function announce(msg, assertive = false) {
   const el = $(assertive ? 'live-assertive' : 'live');
   clearTimeout(liveTimer);
+  el.textContent = ''; // clearing first lets repeated identical messages re-announce
   liveTimer = setTimeout(() => { el.textContent = msg; }, 30);
 }
 
@@ -285,6 +323,8 @@ function startRound(mode, options, meta = {}) {
   session.selectedSlot = null;
   session.cursor = { row: 4, col: 4 };
   session.over = false;
+  session.maxCombo = 0;
+  session.maxLines = 0;
   session.startTime = Date.now();
   session.pausedTotal = 0;
   appState = 'active';
@@ -331,7 +371,13 @@ function endRound() {
     if (s.score.total > best) progress.bestScores['stage' + session.stageId] = s.score.total;
     if (s.won) {
       const stage = stageInfo(session.stageId);
-      const stars = s.score.total >= stage.goal.target * 1.5 ? 3 : s.score.total >= stage.goal.target * 1.2 ? 2 : 1;
+      // Compare the goal's own metric: score targets against score, line
+      // targets against lines cleared (score vs a line target would always
+      // award 3 stars).
+      const metric = stage.goal.type === 'lines' ? s.lines
+        : stage.goal.type === 'moves' ? s.placedPieces
+        : s.score.total;
+      const stars = metric >= stage.goal.target * 1.5 ? 3 : metric >= stage.goal.target * 1.2 ? 2 : 1;
       progress.stars[session.stageId] = Math.max(progress.stars[session.stageId] || 0, stars);
       if (session.stageId === progress.stage && progress.stage < stageCount()) progress.stage++;
     }
@@ -341,7 +387,7 @@ function endRound() {
     if (s.score.total > best) progress.dailyBest[session.dailyDate] = s.score.total;
     submitDailyScore();
   }
-  if (session.mode === 'learn') progress.tutorialDone = true;
+  if (session.mode === 'learn' && session.tutorialStep >= TUTORIAL_STEPS.length) progress.tutorialDone = true;
   persistProgress();
   try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
 
@@ -359,8 +405,8 @@ function checkAchievements(s) {
     platform.unlockAchievement(key);
   };
   if (s.over) unlock('first_completion');
-  if (s.lastGain && s.lastGain.lines >= 3) unlock('mechanic_mastery');
-  if (s.comboStreak >= 4 || (s.lastGain && s.lastGain.comboStreak >= 4)) unlock('sustained_streak');
+  if (session.maxLines >= 3) unlock('mechanic_mastery');
+  if (session.maxCombo >= 4) unlock('sustained_streak');
   if (session.mode === 'journey' && s.won) {
     const stage = stageInfo(session.stageId);
     if (stage && stage.difficulty === 'hard') unlock('difficult_milestone');
@@ -382,13 +428,14 @@ async function submitDailyScore() {
   const el = $('results-compare');
   if (res && res.ok) {
     el.textContent = `Daily rank: #${res.rank} of ${res.count} (validated ✓)`;
+    refreshDailyBoard();
   } else {
     el.textContent = 'Daily score saved locally — server validation unavailable (casual board).';
   }
 }
 
 function elapsedTime() {
-  return Date.now() - session.startTime - session.pausedTotal;
+  return (appState === 'paused' ? session.pausedAt : Date.now()) - session.startTime - session.pausedTotal;
 }
 
 /* ================================================================== */
@@ -402,6 +449,14 @@ function issueCommand(cmd) {
   const check = validateCommand(session.state, cmd);
   if (!check.ok) {
     session.state = applyCommand(session.state, cmd); // counts the invalid attempt
+    // Log in-bounds invalid attempts so deterministic replays reproduce the
+    // same invalid count used for leaderboard tie-breaking.
+    if (check.reason !== 'round-over' && check.reason !== 'malformed-command' &&
+        Number.isInteger(cmd.slot) && cmd.slot >= 0 && cmd.slot < OFFER_COUNT &&
+        Number.isInteger(cmd.row) && cmd.row >= 0 && cmd.row < BOARD_SIZE &&
+        Number.isInteger(cmd.col) && cmd.col >= 0 && cmd.col < BOARD_SIZE) {
+      session.commands.push({ slot: cmd.slot, row: cmd.row, col: cmd.col, inv: 1 });
+    }
     audio.playInvalid(); caption('invalid');
     announce('Invalid action: ' + invalidReasonText(check.reason), true);
     updateHUD();
@@ -414,6 +469,10 @@ function issueCommand(cmd) {
   if (cmd.type === 'place') {
     session.commands.push({ slot: cmd.slot, row: cmd.row, col: cmd.col });
     const gain = session.state.lastGain;
+    if (gain) {
+      session.maxCombo = Math.max(session.maxCombo, gain.comboStreak);
+      session.maxLines = Math.max(session.maxLines, gain.lines);
+    }
     audio.playPlace(); caption('place');
     haptic(15);
     if (gain && gain.lines > 0) {
@@ -442,7 +501,12 @@ function issueCommand(cmd) {
     }
     if (session.mode === 'learn') advanceTutorial(cmd, gain);
     if (session.state.over) {
-      setTimeout(() => endRound(), settings.reducedMotion ? 60 : 450);
+      // Guard against the round being abandoned (quit/new round) before the
+      // results screen is due.
+      const st = session.state;
+      setTimeout(() => {
+        if (session.state === st && !session.over && currentScreen === 'game-screen') endRound();
+      }, settings.reducedMotion ? 60 : 450);
     }
   }
   updateHUD();
@@ -487,6 +551,8 @@ function saveSnapshot() {
   try {
     saveJSON(SAVE_KEY, {
       mode: session.mode, options: session.options, stageId: session.stageId,
+      tutorialStep: session.tutorialStep, dailyDate: session.dailyDate,
+      elapsedMs: elapsedTime(), maxCombo: session.maxCombo, maxLines: session.maxLines,
       commands: session.commands, state: JSON.parse(serializeState(session.state))
     });
   } catch (e) {}
@@ -503,16 +569,22 @@ function tryResumeSnapshot() {
     session.commands = raw.commands || [];
     session.state = state;
     session.stageId = raw.stageId || null;
+    session.dailyDate = raw.dailyDate || null;
     session.selectedSlot = null;
     session.cursor = { row: 4, col: 4 };
     session.over = false;
-    session.startTime = Date.now();
-    appState = session.mode === 'learn' ? 'tutorial' : 'active';
+    session.maxCombo = Number.isFinite(raw.maxCombo) ? raw.maxCombo : 0;
+    session.maxLines = Number.isFinite(raw.maxLines) ? raw.maxLines : 0;
+    session.startTime = Date.now() - (Number.isFinite(raw.elapsedMs) ? Math.max(0, raw.elapsedMs) : 0);
+    session.pausedTotal = 0;
+    session.tutorialStep = Number.isInteger(raw.tutorialStep) ? raw.tutorialStep : 0;
+    appState = session.mode === 'learn' && session.tutorialStep < TUTORIAL_STEPS.length ? 'tutorial' : 'active';
     if (!renderer) rebuildRenderer();
     renderer.applyBoard(state.board);
     renderer.applyOffer(state.offer, null);
     buildRails(); buildOfferTray(); buildBoardMirror(); updateHUD();
     showScreen('game-screen');
+    if (appState === 'tutorial') showTutorialStep(session.tutorialStep);
     announce('Round restored from your last safe snapshot.');
     return true;
   } catch (e) { return false; }
@@ -537,6 +609,10 @@ function updateHUD() {
   }
   const movesStat = $('stat-moves');
   if (movesStat) movesStat.textContent = s.moveLimit ? `${s.placedPieces} / ${s.moveLimit}` : String(s.placedPieces);
+  const linesStat = $('stat-lines');
+  if (linesStat) linesStat.textContent = String(s.lines);
+  const turnStat = $('stat-turn');
+  if (turnStat) turnStat.textContent = String(s.turn);
 }
 
 function buildRails() {
@@ -708,6 +784,7 @@ function advanceTutorial(cmd, gain) {
   if (next >= TUTORIAL_STEPS.length) {
     const card = $('tutorial-card');
     card && card.remove();
+    session.tutorialStep = TUTORIAL_STEPS.length; // lessons done: resume must stay in 'active'
     appState = 'active';
     progress.tutorialDone = true;
     persistProgress();
@@ -1114,7 +1191,11 @@ function doUndo() {
     return;
   }
   session.state = s;
-  session.commands.pop();
+  // Drop the undone placement plus any logged invalid attempts after it.
+  while (session.commands.length) {
+    const c = session.commands.pop();
+    if (!c.inv) break;
+  }
   session.selectedSlot = null;
   renderer.applyBoard(s.board);
   renderer.applyOffer(s.offer, null);
@@ -1181,6 +1262,8 @@ function wire() {
   click('btn-pause-help', () => { buildHelp(); openOverlay('help-overlay'); });
   click('btn-quit', () => {
     closeOverlay('pause-overlay');
+    // A logically finished round still gets its results (and progress) recorded.
+    if (session.state && session.state.over && !session.over) { endRound(); return; }
     appState = 'title';
     showScreen('title-screen');
     updateTitleProgress();
@@ -1254,6 +1337,7 @@ async function boot() {
   }
 
   platform.syncTime().then(updateTitleClock);
+  platform.probe().then(() => { if (session.mode === 'daily') refreshDailyBoard(); });
   setInterval(() => platform.syncTime().then(updateTitleClock), 5 * 60 * 1000);
   lastFrame = performance.now();
   rafId = requestAnimationFrame(frame);

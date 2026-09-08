@@ -30,7 +30,7 @@ function ensureCtx() {
     buses = {};
     for (const name of BUS_NAMES) {
       const g = ctx.createGain();
-      g.gain.value = 0.7;
+      g.gain.value = volumes[name] != null ? volumes[name] : 0.7;
       g.connect(ctx.destination);
       buses[name] = g;
     }
@@ -54,7 +54,9 @@ export function unlockAudio() {
 
 export function setBusVolume(name, v) {
   volumes[name] = Math.max(0, Math.min(1, v));
-  if (!ensureCtx() || !buses[name]) return;
+  // Never force-create the AudioContext outside a user gesture; stored
+  // volumes are applied when unlockAudio() builds the context.
+  if (!ctx || !buses[name]) return;
   buses[name].gain.value = volumes[name];
 }
 
@@ -67,7 +69,7 @@ export function isMuted() { return masterMuted; }
 
 /** Lower everything when the tab is hidden; restore on return. */
 export function setBackgrounded(hidden) {
-  if (!ensureCtx()) return;
+  if (!ctx) return;
   for (const name of BUS_NAMES) {
     const g = buses[name];
     g.gain.setTargetAtTime(hidden ? 0 : volumes[name], ctx.currentTime, 0.1);

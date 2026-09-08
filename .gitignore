@@ -4,3 +4,8 @@ node_modules/
 .DS_Store
 test-results/
 .tmp-build/
+
+# Local diagnostic scripts retained in the workspace
+/dbg.mjs
+/dbg2.mjs
+/tests/e2e_dbg.mjs

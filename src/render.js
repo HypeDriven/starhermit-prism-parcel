@@ -304,7 +304,10 @@ export class Renderer {
   /** Rebuild offer tray meshes from the snapshot offer. */
   applyOffer(offer, selectedSlot) {
     for (const child of [...this.offerGroup.children]) {
-      child.geometry && child.geometry.dispose();
+      child.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) o.material.dispose();
+      });
       this.offerGroup.remove(child);
     }
     this.offerViews = [null, null, null];
@@ -431,6 +434,9 @@ export class Renderer {
     const hh = FRAMING.height / Math.max(0.62, fit);
     this.camera.position.set(0, hh, d);
     this.camera.lookAt(FRAMING.lookAt);
+    // In narrow portrait frames the 3D offer pieces would render half off-screen;
+    // the DOM offer tray already presents them, so hide the 3D duplicates.
+    this.offerGroup.visible = w / h >= 0.8;
     this.camera.updateProjectionMatrix();
   }
 
@@ -452,8 +458,8 @@ export class Renderer {
     }
     if (anyParticle) this.points.geometry.attributes.position.needsUpdate = true;
 
-    // Event-tiered camera shake (never changes raycast truth: applied post-render? —
-    // we apply to a wrapper offset only for drawing and restore immediately).
+    // Event-tiered camera shake: offset only for drawing and restore
+    // immediately afterwards, so raycast truth never changes.
     if (this._shake > 0.001) {
       const s = this._shake;
       this._shake *= Math.exp(-6 * dt);

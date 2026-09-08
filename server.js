@@ -27,7 +27,8 @@ import { dailySeed, dailyRuleset, utcDateStr, CONTENT_VERSION } from './src/cont
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PORT = Number(process.env.PORT) || 8080;
-const DATA_DIR = join(ROOT, 'data');
+// Tests point PRISM_PARCEL_DATA_DIR at a temp dir so they never dirty the repo.
+const DATA_DIR = process.env.PRISM_PARCEL_DATA_DIR || join(ROOT, 'data');
 const BOARD_FILE = join(DATA_DIR, 'daily-boards.json');
 const ACH_FILE = join(DATA_DIR, 'achievements.json');
 const MAX_BODY = 256 * 1024;
@@ -224,7 +225,9 @@ async function handleApi(req, res, url, ip) {
 /* ------------------------------------------------------------------ */
 
 async function serveStatic(req, res, url) {
-  let path = decodeURIComponent(url.pathname);
+  let path;
+  try { path = decodeURIComponent(url.pathname); } catch { return err(res, 400, 'bad-path'); }
+  if (path.split(/[\\/]/).some(p => p.startsWith('.'))) return err(res, 403, 'forbidden');
   if (path === '/') path = '/index.html';
   const full = normalize(join(ROOT, path));
   if (!full.startsWith(ROOT)) return err(res, 403, 'forbidden');
@@ -232,10 +235,13 @@ async function serveStatic(req, res, url) {
   if (full.includes('/data/') || /\/\.[^/]*$/.test(full)) return err(res, 403, 'forbidden');
   try {
     const data = await readFile(full);
-    send(res, 200, data, {
+    const headers = {
       'Content-Type': MIME[extname(full)] || 'application/octet-stream',
-      'Cache-Control': extname(full) === '.html' ? 'no-store' : 'public, max-age=3600, immutable'
-    });
+      'Cache-Control': extname(full) === '.html' ? 'no-store' : 'public, max-age=3600, immutable',
+      'Content-Length': data.length
+    };
+    if (req.method === 'HEAD') { res.writeHead(200, headers); res.end(); return; }
+    send(res, 200, data, headers);
   } catch (e) {
     err(res, 404, 'not-found');
   }
