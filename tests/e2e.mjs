@@ -130,6 +130,22 @@ async function runPass(vpName, viewport, hasTouch, baseURL) {
       await page.waitForSelector('#help-overlay', { state: 'hidden' });
     });
 
+    await step(`${vpName}: learn mode — first lesson advances on placement`, async () => {
+      await page.click('#btn-learn');
+      await page.waitForSelector('#game-screen:not([hidden])');
+      await page.waitForSelector('#tutorial-card');
+      const before = await page.textContent('#tutorial-card h3');
+      if (!before.startsWith('1/')) throw new Error(`expected lesson 1, got "${before}"`);
+      await placeViaHint(page);
+      await page.waitForTimeout(150);
+      const after = await page.textContent('#tutorial-card h3');
+      if (!after.startsWith('2/')) throw new Error(`lesson did not advance: "${after}"`);
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('#pause-overlay:not([hidden])');
+      await page.click('#btn-quit');
+      await page.waitForSelector('#title-screen:not([hidden])');
+    });
+
     await step(`${vpName}: journey setup shows 40 stages`, async () => {
       await page.click('#btn-journey');
       await page.waitForSelector('#setup-screen:not([hidden])');

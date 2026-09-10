@@ -214,6 +214,12 @@ export function playReplenish() {
   tone('effects', { freq: 880, type: 'triangle', dur: 0.1, gain: 0.1, delay: 0.12 });
 }
 
+export function playCombo() {
+  const v = 0.95 + rng.next() * 0.1;
+  tone('effects', { freq: 587 * v, type: 'triangle', dur: 0.09, gain: 0.12 });
+  tone('effects', { freq: 880 * v, type: 'triangle', dur: 0.14, gain: 0.12, delay: 0.07 });
+}
+
 export function playWin() {
   if (playSample('playWin')) return;
   const notes = [523, 659, 784, 1047];
