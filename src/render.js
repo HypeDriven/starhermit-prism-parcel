@@ -158,7 +158,7 @@ export class Renderer {
 
     // Cell sockets (always visible empty wells).
     const socketGeo = new THREE.BoxGeometry(CELL - GAP, 0.06, CELL - GAP);
-    const socketMat = new THREE.MeshStandardMaterial({ color: 0x232a4a, roughness: 0.8, metalness: 0.1 });
+    const socketMat = new THREE.MeshStandardMaterial({ color: 0x35407a, roughness: 0.75, metalness: 0.1, emissive: 0x141a3a, emissiveIntensity: 0.6 });
     this.sockets = new THREE.InstancedMesh(socketGeo, socketMat, BOARD_SIZE * BOARD_SIZE);
     const m = new THREE.Matrix4();
     let i = 0;
@@ -427,11 +427,23 @@ export class Renderer {
     const pr = Math.min(window.devicePixelRatio || 1, this.tier.pixelRatioCap) * this.tier.renderScale;
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
+    // The DOM offer tray covers the bottom of the canvas: frame the board in
+    // the band above it (view offset), and view it more top-down on short
+    // screens so the far rows stay large enough to tap.
+    let trayH = 0;
+    const tray = typeof document !== 'undefined' ? document.getElementById('offer-tray') : null;
+    if (tray && tray.offsetParent) trayH = Math.min(h * 0.35, tray.getBoundingClientRect().height + 8);
+    const safeH = Math.max(120, h - trayH);
+    this.camera.aspect = w / safeH;
+    this.camera.setViewOffset(w, safeH, 0, 0, w, h);
     // Keep the whole board framed in narrow viewports.
-    const fit = Math.min(1, (w / h) / 0.85);
-    const d = FRAMING.distance / Math.max(0.62, fit);
-    const hh = FRAMING.height / Math.max(0.62, fit);
+    const aspect = w / safeH;
+    const fit = Math.min(1, aspect / 0.85);
+    const short = h < 520;
+    const dist0 = short ? FRAMING.distance * 0.8 : FRAMING.distance;
+    const height0 = short ? FRAMING.height * 1.25 : FRAMING.height;
+    const d = dist0 / Math.max(0.62, fit);
+    const hh = height0 / Math.max(0.62, fit);
     this.camera.position.set(0, hh, d);
     this.camera.lookAt(FRAMING.lookAt);
     // In narrow portrait frames the 3D offer pieces would render half off-screen;

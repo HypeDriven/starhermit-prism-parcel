@@ -1007,7 +1007,29 @@ function buildOfferTray() {
     const b = document.createElement('button');
     b.className = 'offer' + (session.selectedSlot === i ? ' selected' : '') + (slot ? '' : ' used');
     b.id = 'offer-' + i;
-    b.textContent = slot ? pieceById(slot.piece).name : 'Placed';
+    if (slot) {
+      // shape thumbnail: the tray shows what the piece looks like, not only its name
+      const piece = pieceById(slot.piece);
+      const cells = piece.cells;
+      const rows = Math.max(...cells.map(c => c[0])) + 1, cols = Math.max(...cells.map(c => c[1])) + 1;
+      const thumb = document.createElement('span');
+      thumb.className = 'offer-thumb';
+      thumb.setAttribute('aria-hidden', 'true');
+      thumb.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      thumb.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+      const filled = new Set(cells.map(c => c[0] * cols + c[1]));
+      for (let k = 0; k < rows * cols; k++) {
+        const dot = document.createElement('i');
+        if (filled.has(k)) dot.className = 'on';
+        thumb.append(dot);
+      }
+      const label = document.createElement('span');
+      label.className = 'offer-name';
+      label.textContent = piece.name;
+      b.append(thumb, label);
+    } else {
+      b.textContent = 'Placed';
+    }
     b.setAttribute('aria-label', slot ? `Select ${pieceById(slot.piece).name}, slot ${i + 1}` : `Slot ${i + 1} empty`);
     b.disabled = !slot;
     b.addEventListener('click', () => selectSlot(i));
