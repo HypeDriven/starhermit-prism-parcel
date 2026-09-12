@@ -54,24 +54,216 @@ const progress = loadJSON(PROGRESS_KEY, {
   totalPlaced: 0, dailyBest: {}, friends: []
 });
 
-function persistSettings() { saveJSON(SETTINGS_KEY, settings); }
-function persistProgress() { saveJSON(PROGRESS_KEY, progress); }
+function persistSettings() { saveJSON(SETTINGS_KEY, settings); scheduleCloudSave(); }
+function persistProgress() { saveJSON(PROGRESS_KEY, progress); scheduleCloudSave(); }
 
 /* ================================================================== */
-/* Platform adapter — same-origin /api, offline-tolerant              */
+/* Platform adapter — launch token, profile, cloud save, boards       */
 /* ================================================================== */
+
+// Minimal ZIP writer/reader (stored entries only, no compression).
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function zipStore(name, dataBytes) {
+  const enc = new TextEncoder();
+  const nameB = enc.encode(name);
+  const crc = crc32(dataBytes);
+  const out = [];
+  const u16 = (v) => out.push(v & 0xff, (v >> 8) & 0xff);
+  const u32 = (v) => out.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff);
+  u32(0x04034b50); u16(20); u16(0); u16(0); u16(0); u16(0);
+  u32(crc); u32(dataBytes.length); u32(dataBytes.length);
+  u16(nameB.length); u16(0);
+  const local = out.length;
+  const head = new Uint8Array(out);
+  const cd = [];
+  const c16 = (v) => cd.push(v & 0xff, (v >> 8) & 0xff);
+  const c32 = (v) => cd.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff);
+  c32(0x02014b50); c16(20); c16(20); c16(0); c16(0); c16(0); c16(0);
+  c32(crc); c32(dataBytes.length); c32(dataBytes.length);
+  c16(nameB.length); c16(0); c16(0); c16(0); c16(0); c32(0); c32(0); // attrs + local-header offset
+  const cdHead = new Uint8Array(cd);
+  const cdOff = head.length + nameB.length + dataBytes.length;
+  const parts = [head, nameB, dataBytes, cdHead, nameB];
+  const eocd = [];
+  const e32 = (v) => eocd.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff);
+  const e16 = (v) => eocd.push(v & 0xff, (v >> 8) & 0xff);
+  e32(0x06054b50); e16(0); e16(0); e16(1); e16(1);
+  e32(cdHead.length + nameB.length); e32(cdOff); e16(0);
+  parts.push(new Uint8Array(eocd));
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const buf = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) { buf.set(p, o); o += p.length; }
+  return buf;
+}
+function unzipFirstEntry(zipBytes) {
+  // Stored single-entry reader: scan local headers for compression 0.
+  const dv = new DataView(zipBytes.buffer, zipBytes.byteOffset, zipBytes.byteLength);
+  let off = 0;
+  while (off + 30 <= zipBytes.length && dv.getUint32(off, true) === 0x04034b50) {
+    const method = dv.getUint16(off + 8, true);
+    const size = dv.getUint32(off + 18, true);
+    const nameLen = dv.getUint16(off + 26, true);
+    const extraLen = dv.getUint16(off + 28, true);
+    const dataOff = off + 30 + nameLen + extraLen;
+    if (method !== 0) throw new Error('unsupported zip entry');
+    return zipBytes.slice(dataOff, dataOff + size);
+  }
+  throw new Error('bad zip');
+}
+function bytesToBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+/** Decode a JWT payload (base64url, no signature verification). */
+function decodeJwtPayload(token) {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
+  } catch (e) { return null; }
+}
+
+/** Read the launch token exactly once. On-platform it arrives in the URL
+ *  fragment (#game_token=<jwt>&session_id=…) and is stripped immediately;
+ *  query-param fallbacks exist for local dev only. Returns null offline. */
+function readLaunchToken() {
+  let token = null;
+  try {
+    const hash = new URLSearchParams(location.hash.slice(1));
+    token = hash.get('game_token');
+    if (token) {
+      history.replaceState(null, '', location.pathname + location.search);
+    } else {
+      const q = new URLSearchParams(location.search);
+      token = q.get('token') || q.get('launch') || q.get('game_token');
+    }
+  } catch (e) { token = null; }
+  if (!token) return null;
+  const payload = decodeJwtPayload(token);
+  if (!payload || !payload.sub) return null;
+  return {
+    token,
+    sub: String(payload.sub),
+    gameScope: payload.game_scope ? String(payload.game_scope) : null
+  };
+}
+
+const profileCache = new Map(); // userId -> Promise<string | null> (raw nickname)
+/** Resolve a user id to a display nickname via the profile route; falls
+ *  back to "Player " + id8. NEVER /api/v1/me, never usernames. */
+function profileName(userId) {
+  const id = String(userId || '');
+  if (!id) return Promise.resolve('Player');
+  if (!profileCache.has(id)) {
+    profileCache.set(id, (async () => {
+      try {
+        const res = await fetch('/api/v1/users/' + encodeURIComponent(id) + '/profile',
+          { headers: platform.authHeaders(), cache: 'no-store' });
+        if (!res.ok) return null;
+        const p = await res.json();
+        return p && typeof p.nickname === 'string' && p.nickname ? p.nickname : null;
+      } catch (e) { return null; }
+    })());
+  }
+  return profileCache.get(id).then(n => n || 'Player ' + id.slice(0, 8));
+}
+
+/* --------------------------- cloud save --------------------------- */
+
+let cloudTimer = 0;
+
+function buildSaveDoc() {
+  return {
+    v: 1,
+    savedAt: Date.now(),
+    settings: JSON.parse(JSON.stringify(settings)),
+    progress: JSON.parse(JSON.stringify(progress))
+  };
+}
+
+/** Apply a remote save doc over the local cache (remote wins on conflict). */
+function applySaveDoc(doc) {
+  if (!doc || typeof doc !== 'object') return false;
+  if (doc.settings && typeof doc.settings === 'object') {
+    for (const k of Object.keys(DEFAULT_SETTINGS)) {
+      if (doc.settings[k] !== undefined) settings[k] = doc.settings[k];
+    }
+  }
+  if (doc.progress && typeof doc.progress === 'object') {
+    for (const k of Object.keys(progress)) {
+      if (doc.progress[k] !== undefined) progress[k] = doc.progress[k];
+    }
+  }
+  saveJSON(SETTINGS_KEY, settings);
+  saveJSON(PROGRESS_KEY, progress);
+  applySettings();
+  updateTitleProgress();
+  return true;
+}
+
+/** Mirror the local cache to the platform cloud-save slot, debounced ~2 s. */
+function scheduleCloudSave() {
+  if (!platform.hosted) return;
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(() => { platform.saveCloud(false); }, 2000);
+}
+
+function setSyncState(state) {
+  platform.syncState = state;
+  updateTitleProfile();
+}
 
 const platform = {
-  serverOffset: 0, // server time minus client time (ms)
+  serverOffset: 0, // server time minus client time (ms); dev-server sync only
   online: false,
-  serverApi: false, // true only when /api/v1/health proves our game server is present
+  hosted: false,  // true iff a launch token was read from the URL
+  token: null,
+  userId: null,   // JWT sub
+  gameSlug: null, // JWT game_scope (never hard-coded)
+  nickname: null,
+  serverApi: false, // true only when the game's own dev server answers /api/v1/health
+  syncState: 'offline', // offline | syncing | synced | error
+  refreshTimer: 0,
+  gameInfoCache: null,
 
-  /** Synchronize with GET /api/v1/time using round-trip adjustment.
-   *  This is the only platform route guaranteed to exist when hosted;
-   *  other hosted features stay local no-ops unless probe() confirms
-   *  the authoritative game server is actually serving this origin,
-   *  so no request is ever issued to a route the platform does not serve. */
+  authHeaders(extra) {
+    const h = { ...(extra || {}) };
+    if (this.token) h.Authorization = 'Bearer ' + this.token;
+    return h;
+  },
+
+  /** Display name: profile nickname, else "Player " + id8. */
+  displayName() {
+    if (this.nickname) return this.nickname;
+    if (this.userId) return 'Player ' + this.userId.slice(0, 8);
+    return 'Player';
+  },
+
+  now() { return Date.now() + this.serverOffset; },
+
+  /** Time sync against the game's own dev server (local play only).
+   *  The platform serves no time endpoint reachable by launch tokens;
+   *  hosted mode relies on the device clock. */
   async syncTime() {
+    if (this.hosted) { this.online = true; return; }
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 6000);
@@ -88,9 +280,11 @@ const platform = {
     } catch (e) { this.online = false; }
   },
 
-  /** One-shot capability probe: enable server-backed features only when the
-   *  authoritative server (server.js) identifies itself via /api/v1/health. */
-  async probe() {
+  /** Detect the game's own dev server (npm start) so local play can use its
+   *  validated daily board and achievement mirror. Hosted features never
+   *  depend on this probe; every call below fails over gracefully. */
+  async probeDevServer() {
+    if (this.hosted) { this.serverApi = false; return; }
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 6000);
@@ -102,13 +296,86 @@ const platform = {
     } catch (e) { this.serverApi = false; }
   },
 
-  now() { return Date.now() + this.serverOffset; },
+  /* ---- launch-token refresh (60 min lifetime) ---- */
 
+  scheduleRefresh(delay = 45 * 60 * 1000) {
+    if (!this.hosted || !this.gameSlug) return;
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => { this.refreshToken(); }, delay);
+  },
+
+  async refreshToken() {
+    try {
+      const res = await fetch('/api/v1/games/' + encodeURIComponent(this.gameSlug) + '/launch-token', {
+        method: 'POST', headers: this.authHeaders()
+      });
+      if (!res.ok) throw new Error('http-' + res.status);
+      const body = await res.json().catch(() => null);
+      if (body && typeof body.token === 'string' && body.token) this.token = body.token;
+      this.scheduleRefresh();
+    } catch (e) { this.scheduleRefresh(60 * 1000); }
+  },
+
+  /* ---- identity ---- */
+
+  async loadProfile() {
+    if (!this.hosted || !this.userId) return;
+    const name = await profileName(this.userId);
+    if (name) this.nickname = name;
+    updateTitleProfile();
+  },
+
+  /* ---- cloud save (localStorage stays the offline cache) ---- */
+
+  async loadCloud() {
+    if (!this.hosted || !this.gameSlug) return;
+    setSyncState('syncing');
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 10000);
+      const res = await fetch('/api/v1/me/cloud-saves/' + encodeURIComponent(this.gameSlug),
+        { headers: this.authHeaders(), cache: 'no-store', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.status === 404) { setSyncState('synced'); return; } // no remote save yet
+      if (!res.ok) throw new Error('http-' + res.status);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const doc = JSON.parse(new TextDecoder().decode(unzipFirstEntry(bytes)));
+      applySaveDoc(doc);
+      setSyncState('synced');
+    } catch (e) { setSyncState('offline'); }
+  },
+
+  async saveCloud(flush) {
+    if (!this.hosted || !this.gameSlug) return;
+    clearTimeout(cloudTimer);
+    setSyncState('syncing');
+    try {
+      const doc = JSON.stringify(buildSaveDoc());
+      const zip = zipStore('prism-parcel-save.json', new TextEncoder().encode(doc));
+      const res = await fetch('/api/v1/me/cloud-saves/' + encodeURIComponent(this.gameSlug), {
+        method: 'PUT',
+        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ dataBase64: bytesToBase64(zip) }),
+        ...(flush ? { keepalive: true } : {})
+      });
+      if (!res.ok) throw new Error('http-' + res.status);
+      setSyncState('synced');
+    } catch (e) { setSyncState('offline'); }
+  },
+
+  /* ---- daily board + submission ---- */
+
+  /** Clients can never submit to a platform leaderboard (script-owned).
+   *  Hosted: no submission — the day's best is kept locally and mirrored
+   *  via the cloud save. Local dev: validated replay goes to the game's
+   *  own server when present. */
   async submitDaily(entry) {
+    if (this.hosted) return { ok: false, hosted: true };
     if (!this.serverApi) return { ok: false, error: 'offline' };
     try {
       const res = await fetch('/api/v1/daily/score', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(entry)
       });
       const body = await res.json().catch(() => null);
@@ -117,6 +384,7 @@ const platform = {
   },
 
   async dailyBoard(date) {
+    if (this.hosted) return this.platformBoard();
     if (!this.serverApi) return { ok: false, entries: [] };
     try {
       const res = await fetch('/api/v1/daily/leaderboard?date=' + encodeURIComponent(date), { cache: 'no-store' });
@@ -125,14 +393,53 @@ const platform = {
     } catch (e) { return { ok: false, entries: [] }; }
   },
 
+  /** Read-only platform leaderboard (hosted mode): resolve entry user ids
+   *  to nicknames via the profile helper. */
+  async platformBoard() {
+    try {
+      const info = await this.gameInfo();
+      const lid = info && info.leaderboardId;
+      if (!lid) return { ok: true, entries: [], localOnly: true };
+      const res = await fetch('/api/v1/leaderboards/' + encodeURIComponent(lid) +
+        '/entries?page=1&pageSize=8', { headers: this.authHeaders(), cache: 'no-store' });
+      if (!res.ok) throw new Error('http-' + res.status);
+      const body = await res.json();
+      const list = (body && (body.entries || body.items)) || [];
+      const entries = [];
+      for (const e of list.slice(0, 8)) {
+        const uid = e.userId || e.user_id || e.id;
+        entries.push({
+          name: await profileName(uid),
+          score: e.score != null ? e.score : (e.value != null ? e.value : 0)
+        });
+      }
+      return { ok: true, entries };
+    } catch (e) { return { ok: false, entries: [] }; }
+  },
+
+  async gameInfo() {
+    if (this.gameInfoCache !== null) return this.gameInfoCache || null;
+    try {
+      const res = await fetch('/api/v1/games/' + encodeURIComponent(this.gameSlug),
+        { headers: this.authHeaders(), cache: 'no-store' });
+      if (!res.ok) throw new Error('http-' + res.status);
+      this.gameInfoCache = await res.json();
+    } catch (e) { this.gameInfoCache = null; }
+    return this.gameInfoCache;
+  },
+
+  /** Achievements are local (part of the cloud-saved progress doc) — this
+   *  game has no Jint game script. In local dev, mirror unlocks to the
+   *  game's own server when it is present; best-effort. */
   async unlockAchievement(key) {
-    if (!this.serverApi) return; /* kept locally only when offline */
+    if (this.hosted || !this.serverApi) return;
     try {
       await fetch('/api/v1/achievements', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, player: 'guest' })
+        method: 'POST',
+        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ key, player: this.userId || 'guest' })
       });
-    } catch (e) { /* durable delivery retried on next unlock attempt */ }
+    } catch (e) { /* local unlock is authoritative; mirror retried on next unlock */ }
   }
 };
 
@@ -422,12 +729,18 @@ async function submitDailyScore() {
     seed: session.options.seed,
     settings: { maxTier: session.options.maxTier },
     replay,
-    elapsedMs: elapsedTime()
+    elapsedMs: elapsedTime(),
+    name: platform.displayName()
   };
   const res = await platform.submitDaily(entry);
   const el = $('results-compare');
   if (res && res.ok) {
     el.textContent = `Daily rank: #${res.rank} of ${res.count} (validated ✓)`;
+    refreshDailyBoard();
+  } else if (res && res.hosted) {
+    // Platform boards are script-owned — clients cannot submit. The day's
+    // best lives in progress and is mirrored by the cloud save.
+    el.textContent = `Daily complete — best today: ${progress.dailyBest[session.dailyDate] || '—'} (saved to your account).`;
     refreshDailyBoard();
   } else {
     el.textContent = 'Daily score saved locally — server validation unavailable (casual board).';
@@ -669,6 +982,10 @@ async function refreshDailyBoard() {
   if (!el || !session.dailyDate) return;
   const res = await platform.dailyBoard(session.dailyDate);
   if (!el.isConnected) return;
+  if (res.ok && res.localOnly) {
+    el.textContent = `Platform board unavailable — your best today: ${progress.dailyBest[session.dailyDate] || '—'}.`;
+    return;
+  }
   if (!res.ok || !res.entries.length) {
     el.textContent = res.ok ? 'No scores yet today — be the first!' : 'Board unavailable offline.';
     return;
@@ -991,8 +1308,29 @@ function updateTitleProgress() {
     `Journey stage ${progress.stage}/${stageCount()} · ${stars} ★ · Rank: ${tier.name}`;
 }
 
+/** Name + cloud-sync status slot (hosted), or the honest local label. */
+function updateTitleProfile() {
+  const el = $('title-profile');
+  if (!el) return;
+  if (platform.hosted) {
+    const syncLabel = {
+      syncing: 'Saving…', synced: 'Cloud save synced',
+      offline: 'Offline — local cache', error: 'Sync failed'
+    }[platform.syncState] || '';
+    el.textContent = `Playing as ${platform.displayName()} · ${syncLabel}`;
+  } else {
+    el.textContent = 'Local progress (offline cache)';
+  }
+}
+
 function updateTitleClock() {
   const date = utcDateStr(platform.now());
+  if (platform.hosted) {
+    // No platform time endpoint for launch tokens: the device clock drives
+    // daily boundaries; identity and sync state live in #title-profile.
+    $('title-clock').textContent = `UTC day ${date}`;
+    return;
+  }
   $('title-clock').textContent = `UTC day ${date}${platform.online ? ' · server time synced' : ' · offline mode'}`;
 }
 
@@ -1221,8 +1559,10 @@ function frame(t) {
 function setupLifecycle() {
   document.addEventListener('visibilitychange', () => {
     audio.setBackgrounded(document.hidden);
+    if (document.hidden) platform.saveCloud(true); // flush pending cloud save
     if (document.hidden && currentScreen === 'game-screen' && !session.over) pauseGame();
   });
+  window.addEventListener('pagehide', () => platform.saveCloud(true));
   window.addEventListener('resize', () => renderer && renderer.resize());
   window.addEventListener('orientationchange', () => setTimeout(() => renderer && renderer.resize(), 60));
   window.addEventListener('beforeunload', () => session.state && !session.state.over && saveSnapshot());
@@ -1298,6 +1638,20 @@ function wire() {
 
 async function boot() {
   appState = 'boot';
+
+  // Launch token first: hosted mode activates iff a token was read.
+  const launch = readLaunchToken();
+  if (launch) {
+    platform.hosted = true;
+    platform.online = true;
+    platform.token = launch.token;
+    platform.userId = launch.sub;
+    platform.gameSlug = launch.gameScope;
+    platform.scheduleRefresh();
+    platform.loadProfile();
+    try { await platform.loadCloud(); } catch (e) { /* local cache remains authoritative offline */ }
+  }
+
   applySettings();
   wire();
   setupPointer();
@@ -1305,6 +1659,7 @@ async function boot() {
   setupGamepad();
   setupLifecycle();
   updateTitleProgress();
+  updateTitleProfile();
 
   // WebGL capability check with clear compatibility message.
   try {
@@ -1336,9 +1691,18 @@ async function boot() {
     startRound('journey', { seed: st.seed, maxTier: st.maxTier, goal: { ...st.goal }, moveLimit: st.moveLimit }, { stageId: st.id });
   }
 
-  platform.syncTime().then(updateTitleClock);
-  platform.probe().then(() => { if (session.mode === 'daily') refreshDailyBoard(); });
-  setInterval(() => platform.syncTime().then(updateTitleClock), 5 * 60 * 1000);
+  if (platform.hosted) {
+    updateTitleClock();
+    // A direct-launched daily round renders its board through the read-only
+    // platform leaderboard (gameInfo/platformBoard are token-authed).
+    if (session.mode === 'daily') refreshDailyBoard();
+  } else {
+    // Local play: the game's own dev server (npm start) optionally provides
+    // time sync, a validated daily board and an achievement mirror.
+    platform.syncTime().then(updateTitleClock);
+    platform.probeDevServer().then(() => { if (session.mode === 'daily') refreshDailyBoard(); });
+    setInterval(() => platform.syncTime().then(updateTitleClock), 5 * 60 * 1000);
+  }
   lastFrame = performance.now();
   rafId = requestAnimationFrame(frame);
 }

@@ -162,7 +162,7 @@ Follow the skill pack's acceptance gate: deterministic seeds, debug views for co
 - `ui`: responsive DOM shell, focus, localization, settings, overlays, accessibility mirror.
 - `audio`: buses, event mapping, focus/background behavior, decode and memory policy.
 - `content`: versioned levels, themes, tutorials, validation metadata.
-- `platform`: token-aware REST/WebSocket adapter, retries, rate-limit handling, telemetry consent.
+- `platform`: token-aware REST adapter — fragment launch-token read/45-min refresh, profile nickname, zip+base64 cloud save (debounced + pagehide flush, localStorage offline cache), read-only platform boards; offline-tolerant.
 
 No module may mutate rules state except through a validated command. Rendering consumes immutable snapshots plus interpolation data. UI state and simulation state are separate so closing a drawer cannot affect a match.
 
@@ -185,22 +185,22 @@ No module may mutate rules state except through a validated command. Rendering c
 
 ### Packaging and launch
 - Ship a browser distribution with `starhermit.txt` at its root, `name=Prism Parcel`, and `launch=index.html`. Keep source files, secrets, design documents, and source maps outside the uploaded distribution.
-- Read the game scope from the short-lived launch token rather than hard-coding a slug. Use same-origin `/api` and `/ws` routes when hosted. Refresh account tokens through the host shell; never persist access or launch tokens in local storage.
-- Synchronize countdowns and daily boundaries with `GET /api/v1/time` using round-trip-adjusted offset. Treat rate limits and structured `{"error":"..."}` responses as recoverable UI states.
+- Read the game scope from the short-lived launch token rather than hard-coding a slug: the fragment `#game_token=<jwt>` is read once and stripped, `sub`/`game_scope` are decoded, and `Authorization: Bearer` rides on every REST call. Refresh in-game via `POST /api/v1/games/{slug}/launch-token` every 45 min (retry ~60 s); never persist access or launch tokens in local storage. Query-param token fallbacks are local-dev only; no WebSocket is used.
+- Synchronize countdowns and daily boundaries through `platform.now()`: the game's own dev server provides round-trip-adjusted `GET /api/v1/time` for local play; hosted mode relies on the device clock because the platform serves no time endpoint reachable by launch tokens. Treat rate limits and structured `{"error":"..."}` responses as recoverable UI states.
 
 ### Identity, profile, presence, and preferences
-- Support guest practice locally, then offer account sign-in for durable progress. Use the profile display name and avatar only where identity is useful, honor profile privacy, and send throttled presence heartbeats while actively playing.
+- Support guest practice locally, then offer account sign-in for durable progress. Use the profile display name and avatar only where identity is useful and honor profile privacy; the game sends no presence or telemetry calls (host-owned surfaces only).
 - Store accessibility, audio, graphics tier, tutorial completion, camera preference, and rules options through per-game settings. Declare desktop action bindings and read player overrides; touch mappings remain responsive UI controls.
-- Cloud-save progression as a versioned, checksummed document. Resolve conflicts by preserving both snapshots and asking the player when neither is a strict descendant. Never place credentials or private chat in saves.
+- Cloud-save progression as a versioned document (zip+base64) to the platform cloud-save slot, remote-wins on conflict, with localStorage as the offline cache; never place credentials or private chat in saves.
 
 ### Discovery, activity, and social layer
-- Start and end launch activity so playtime is accurate. Surface entitlement or catalog state only in host-owned chrome; the game itself must remain playable without promotional interruption.
+- Start and end launch activity is host-owned; the game issues no activity, presence, or telemetry calls itself. Surface entitlement or catalog state only in host-owned chrome; the game itself must remain playable without promotional interruption.
 - Provide a compact friends panel for score comparison and invitations where appropriate. Respect presence visibility and do not expose a hidden or private profile through game UI.
 - Do not create gameplay chat or voice surfaces for the initial release; they are not relevant to the core solo loop. Friends-only leaderboard filtering and shareable challenge seeds supply the social layer without unnecessary communication permissions.
 
 ### Achievements and leaderboards
 - Declare a small static achievement set: first completion, mechanic mastery, a sustained streak, a difficult content milestone, and an accessibility-neutral long-term goal. Keys are stable, lowercase identifiers; unlocks are idempotent.
-- Provide global and friends-filtered boards for the primary metric plus a fair daily/weekly board. Include ruleset, content version, seed, assists, and duration with every submission; reject impossible or stale-version scores.
+- Leaderboards are platform-owned: the client reads `GET /api/v1/games/{slug}` → `GET /api/v1/leaderboards/{id}/entries` (nicknames via the profile route) and can never submit scores. Personal bests stay local and cloud-saved. In local dev, the game's own server still provides the replay-validated daily board and accepts submissions (ruleset, content version, seed, duration included; impossible or stale-version scores rejected).
 - For globally competitive boards, validate score claims through a lightweight authoritative script using replayable input logs and deterministic seeds. If validation is unavailable, label the board casual and apply plausibility/rate checks.
 
 ### Sessions and transport
