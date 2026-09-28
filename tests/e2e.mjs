@@ -53,7 +53,7 @@ const errors = [];
 function watchPage(page) {
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() !== 'error') return;
+    if (m.type() !== 'error' && m.type() !== 'warning') return;
     const text = m.text();
     if (browserNoise.test(text)) return;
     // Offline mode by design: the static test server has no /api routes.
@@ -119,6 +119,56 @@ async function runPass(vpName, viewport, hasTouch, baseURL) {
       const hc2 = page.locator('#settings-body label', { hasText: 'High contrast' }).locator('input');
       if (await hc2.isChecked()) await hc2.uncheck();
       await page.click('#btn-settings-close');
+    });
+
+    await step(`${vpName}: graphics settings — presets, override, persistence`, async () => {
+      await page.click('#btn-settings');
+      await page.click('#settings-tab-graphics');
+      await page.waitForSelector('#settings-graphics:not([hidden])');
+      if (!(await page.isVisible('#gfx-preset'))) throw new Error('graphics tab not visible');
+      const auto = await page.getAttribute('body', 'data-gfx-preset');
+      if (auto !== 'low') throw new Error(`software GPU should auto-resolve to low, got ${auto}`);
+      await page.selectOption('#gfx-preset', 'low');
+      if ((await page.getAttribute('#gl', 'data-gfx-preset')) !== 'low') throw new Error('low not applied');
+      await page.selectOption('#gfx-preset', 'high');
+      if ((await page.getAttribute('#gl', 'data-gfx-preset')) !== 'high') throw new Error('high not applied');
+      const summary = await page.textContent('#gfx-summary');
+      if (!/2048² shadows/.test(summary)) throw new Error(`summary not updated: ${summary}`);
+      await page.selectOption('#gfx-bloom', 'off');
+      const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('prism-parcel:settings:v1')).graphics);
+      if (stored.preset !== 'high' || stored.bloom !== 'off') throw new Error('graphics not persisted: ' + JSON.stringify(stored));
+      // The panel must fit: the Done button is reachable by scrolling inside the panel.
+      await page.locator('#btn-settings-close').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: shot('graphics', vpName) });
+      await page.click('#btn-settings-close');
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForSelector('#title-screen:not([hidden])');
+      if ((await page.getAttribute('body', 'data-gfx-preset')) !== 'high') throw new Error('preset lost on reload');
+      await page.click('#btn-settings');
+      await page.click('#settings-tab-graphics');
+      if ((await page.inputValue('#gfx-bloom')) !== 'off') throw new Error('override lost on reload');
+      if (vpName === 'desktop') {
+        // Ultra renders a round with the full post chain without console output.
+        await page.selectOption('#gfx-preset', 'ultra');
+        if ((await page.inputValue('#gfx-bloom')) !== 'preset') throw new Error('choosing a preset must clear overrides');
+        await page.click('#btn-settings-close');
+        await page.click('#btn-practice');
+        await page.click('#setup-start');
+        await page.waitForSelector('#game-screen:not([hidden])');
+        await placeViaHint(page);
+        await page.waitForTimeout(600);
+        await page.screenshot({ path: shot('ultra', vpName) });
+        await page.keyboard.press('Escape');
+        await page.click('#btn-pause-settings');
+        await page.click('#settings-tab-graphics');
+      }
+      await page.selectOption('#gfx-preset', 'auto');
+      if ((await page.getAttribute('body', 'data-gfx-preset')) !== 'low') throw new Error('auto not restored');
+      await page.click('#btn-settings-close');
+      if (vpName === 'desktop') {
+        await page.click('#btn-quit');
+        await page.waitForSelector('#title-screen:not([hidden])');
+      }
     });
 
     await step(`${vpName}: help overlay open/close`, async () => {

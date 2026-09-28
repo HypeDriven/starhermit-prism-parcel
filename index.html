@@ -40,7 +40,17 @@ p,li{max-width:70ch}
   box-shadow:0 8px 30px rgba(0,0,0,.35)}
 .menu{display:flex;flex-direction:column;gap:.6rem;min-width:min(320px,86vw)}
 .menu button{width:100%}
-.brand{font-size:clamp(2rem,6vw,3.2rem);letter-spacing:.06em;margin:0;
+#title-screen{position:relative;isolation:isolate}
+#title-screen::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(60% 45% at 50% 38%,rgba(111,211,255,.12),transparent 70%),
+    radial-gradient(40% 35% at 30% 70%,rgba(201,159,255,.10),transparent 70%),
+    radial-gradient(40% 35% at 72% 64%,rgba(127,231,196,.09),transparent 70%)}
+body.gfx-animated #title-screen::after{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none;
+  background:conic-gradient(from 0deg at 50% 50%,rgba(127,231,196,.07),rgba(111,211,255,.02),rgba(201,159,255,.07),rgba(255,157,111,.03),rgba(127,231,196,.07));
+  filter:blur(40px);animation:prism-drift 38s linear infinite}
+@keyframes prism-drift{to{transform:rotate(360deg)}}
+body.reduced-motion #title-screen::after{animation:none}
+.brand{filter:drop-shadow(0 0 18px rgba(111,211,255,.28));font-size:clamp(2rem,6vw,3.2rem);letter-spacing:.06em;margin:0;
   background:linear-gradient(90deg,#7fe7c4,#6fd3ff,#c99fff);-webkit-background-clip:text;background-clip:text;color:transparent}
 .tagline{color:var(--dim);margin:0 0 1rem}
 .row{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:center}
@@ -87,6 +97,17 @@ p,li{max-width:70ch}
 .settings-grid label{display:flex;justify-content:space-between;align-items:center;gap:1rem}
 .settings-grid input[type=range]{flex:1;max-width:200px}
 .settings-grid select{background:#2a3464;color:var(--ink);border:1px solid #3d4a8a;border-radius:8px;padding:.35rem}
+.settings-tabs{display:flex;gap:.4rem;margin:.2rem 0 .9rem;border-bottom:1px solid #2c3766;padding-bottom:.6rem}
+.settings-tabs button{flex:1;background:transparent}
+.settings-tabs button[aria-selected=true]{background:#2a3464;border-color:var(--accent);color:var(--ink);font-weight:700}
+.settings-grid select{max-width:58%;min-height:36px}
+.gfx-scale{display:flex;align-items:center;gap:.5rem;flex:1;justify-content:flex-end;max-width:240px;min-width:0}
+.gfx-scale input{flex:1;min-width:0}
+.gfx-scale output{min-width:3.2em;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.gfx-summary{margin:.2rem 0 0;word-break:break-word}
+.gfx-note{margin:0;color:var(--focus)}
+#fps-meter{position:fixed;left:calc(.5rem + var(--sal));bottom:calc(.5rem + var(--sab));z-index:50;pointer-events:none;
+  font:600 .75rem/1 ui-monospace,monospace;color:var(--accent);background:rgba(8,10,22,.7);padding:.3rem .5rem;border-radius:6px}
 .stage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:.5rem;max-width:560px}
 .stage-grid button{padding:.5rem .2rem;display:flex;flex-direction:column;gap:.1rem;font-size:.85rem}
 .stage-grid button .stars{color:var(--focus);font-size:.7rem}
@@ -120,6 +141,7 @@ p,li{max-width:70ch}
   #offer-tray{bottom:calc(.2rem + var(--sab))}
   button{min-height:44px}
 }
+body.reduced-motion *{animation:none !important}
 @media (prefers-reduced-motion:reduce){
   *{animation:none !important;transition:none !important}
 }
@@ -129,7 +151,10 @@ body.high-contrast button{border-width:2px}
 body.large-text{font-size:120%}
 </style>
 <script type="importmap">
-{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+{ "imports": {
+  "three": "./vendor/three/three.module.min.js",
+  "three/addons/": "./vendor/three/addons/"
+} }
 </script>
 </head>
 <body>
@@ -222,7 +247,12 @@ body.large-text{font-size:120%}
 <div id="settings-overlay" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="settings-heading">
   <div class="panel">
     <h2 id="settings-heading">Settings</h2>
-    <div class="settings-grid" id="settings-body"></div>
+    <div class="settings-tabs" id="settings-tabs" role="tablist" aria-label="Settings sections">
+      <button id="settings-tab-general" role="tab" aria-selected="true" aria-controls="settings-body" data-settings-tab="general">General</button>
+      <button id="settings-tab-graphics" role="tab" aria-selected="false" aria-controls="settings-graphics" data-settings-tab="graphics" tabindex="-1">Graphics</button>
+    </div>
+    <div class="settings-grid" id="settings-body" role="tabpanel" aria-labelledby="settings-tab-general"></div>
+    <div class="settings-grid" id="settings-graphics" role="tabpanel" aria-labelledby="settings-tab-graphics" hidden></div>
     <div class="row" style="margin-top:1rem">
       <button id="btn-settings-close" class="primary">Done</button>
     </div>

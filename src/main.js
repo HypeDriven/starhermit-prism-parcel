@@ -15,7 +15,9 @@ import {
   dailyRuleset, utcDateStr, practiceOptions, TUTORIAL_STEPS, ACHIEVEMENTS,
   MASTERY_TIERS, CONTENT_VERSION
 } from './content.js';
-import { Renderer, QUALITY_TIERS } from './render.js';
+import { Renderer } from './render.js';
+import { PRESETS, CATEGORIES, presetTier, resolve as resolveGfx, choosePreset } from './gfx.js';
+import { gfxStrings } from './gfx-i18n.js';
 import * as audio from './audio.js';
 
 const $ = id => document.getElementById(id);
@@ -30,7 +32,7 @@ const SAVE_KEY = 'prism-parcel:save:v1';
 
 const DEFAULT_SETTINGS = {
   music: 0.5, effects: 0.8, ambience: 0.4, voice: 0.6,
-  muted: false, quality: 'high', theme: 'aurora',
+  muted: false, graphics: { preset: 'auto' }, theme: 'aurora',
   reducedMotion: false, highContrast: false, largeText: false,
   cvdPalette: false, captions: true, leftHanded: false, haptics: true
 };
@@ -49,6 +51,15 @@ function saveJSON(key, value) {
 }
 
 const settings = loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS);
+migrateGraphics(settings);
+
+/** Older saves had a single `quality` tier; map it onto the graphics presets. */
+function migrateGraphics(s) {
+  if (!s.graphics || typeof s.graphics !== 'object') {
+    s.graphics = { preset: ({ low: 'low', medium: 'balanced' })[s.quality] || 'auto' };
+  }
+  delete s.quality;
+}
 const progress = loadJSON(PROGRESS_KEY, {
   stage: 1, stars: {}, bestScores: {}, achievements: {}, tutorialDone: false,
   totalPlaced: 0, dailyBest: {}, friends: []
@@ -206,6 +217,11 @@ function applySaveDoc(doc) {
     for (const k of Object.keys(DEFAULT_SETTINGS)) {
       if (doc.settings[k] !== undefined) settings[k] = doc.settings[k];
     }
+    if (doc.settings.graphics === undefined && doc.settings.quality !== undefined) {
+      settings.graphics = null;
+      settings.quality = doc.settings.quality;
+    }
+    migrateGraphics(settings);
   }
   if (doc.progress && typeof doc.progress === 'object') {
     for (const k of Object.keys(progress)) {
@@ -564,7 +580,6 @@ function buildSettings() {
   row('Ambience volume', slider('ambience'));
   row('Voice/cue volume', slider('voice'));
   row('Mute all', toggle('muted'));
-  row('Graphics quality', select('quality', Object.keys(QUALITY_TIERS)));
   row('Visual theme', select('theme', THEMES, Object.fromEntries(THEMES.map(t => [t, themeInfo(t).name]))));
   row('Reduced motion', toggle('reducedMotion'));
   row('High contrast', toggle('highContrast'));
@@ -578,6 +593,163 @@ function buildSettings() {
   replayTut.textContent = 'Replay tutorial';
   replayTut.addEventListener('click', () => { closeOverlay('settings-overlay'); startLearn(); });
   row('Tutorial', replayTut);
+  buildGraphicsSettings();
+}
+
+/* ---- Graphics tab ---------------------------------------------------- */
+
+const GS = gfxStrings(typeof navigator !== 'undefined' ? navigator.language : 'en-US');
+let gfxInfoTimer = 0;
+
+function setSettingsTab(tab) {
+  for (const t of ['general', 'graphics']) {
+    const on = t === tab;
+    const btn = $('settings-tab-' + t);
+    btn.setAttribute('aria-selected', String(on));
+    btn.tabIndex = on ? 0 : -1;
+    $(t === 'general' ? 'settings-body' : 'settings-graphics').hidden = !on;
+  }
+  clearInterval(gfxInfoTimer);
+  if (tab === 'graphics') {
+    updateGraphicsInfo();
+    gfxInfoTimer = setInterval(() => {
+      if ($('settings-overlay').hidden) { clearInterval(gfxInfoTimer); return; }
+      updateGraphicsInfo();
+    }, 1000);
+  }
+}
+
+function openSettings() {
+  buildSettings();
+  setSettingsTab('general');
+  openOverlay('settings-overlay');
+}
+
+function applyGraphics() {
+  if (renderer) renderer.setGraphics(settings.graphics);
+  syncGfxAttrs();
+  persistSettings();
+  updateGraphicsInfo();
+}
+
+/** Expose the resolved preset (tests, CSS) and gate the title-screen shimmer. */
+function syncGfxAttrs() {
+  const r = renderer ? renderer.q : resolveGfx(settings.graphics, 'low');
+  document.body.dataset.gfxPreset = r.preset;
+  $('gl').dataset.gfxPreset = r.preset;
+  document.body.classList.toggle('gfx-animated', r.background === 'animated');
+}
+
+function updateGraphicsInfo() {
+  const el = $('gfx-summary');
+  if (!el || !renderer) return;
+  const info = renderer.graphicsInfo(GS.words);
+  el.textContent = `${info.gpu} · ${info.summary}` + (info.resolved.showFps && info.fps ? ` · ${info.fps} fps` : '');
+  $('gfx-post-note').hidden = !info.postFailed;
+}
+
+function buildGraphicsSettings() {
+  const body = $('settings-graphics');
+  body.innerHTML = '';
+  const g = settings.graphics;
+  const detected = renderer ? renderer.detected : 'balanced';
+  const tierName = (t) => GS.tier[t] || t;
+  const current = resolveGfx(g, detected);
+  const row = (label, control, id) => {
+    const l = document.createElement('label');
+    const span = document.createElement('span');
+    span.textContent = label;
+    control.id = id;
+    l.htmlFor = id;
+    l.append(span, control);
+    body.append(l);
+    return control;
+  };
+  const selectEl = (options) => {
+    const s = document.createElement('select');
+    for (const [v, text] of options) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = text;
+      s.append(o);
+    }
+    return s;
+  };
+
+  const preset = row(GS.quality, selectEl([
+    ['auto', GS.auto.replace('{tier}', tierName(detected))],
+    ...PRESETS.map(p => [p, tierName(p)])
+  ]), 'gfx-preset');
+  preset.value = PRESETS.includes(g.preset) ? g.preset : 'auto';
+  preset.addEventListener('change', () => {
+    settings.graphics = choosePreset(settings.graphics, preset.value);
+    applyGraphics();
+    buildGraphicsSettings();
+    $('gfx-preset').focus();
+  });
+
+  // Render scale slider with its value on the same line.
+  const scaleWrap = document.createElement('span');
+  scaleWrap.className = 'gfx-scale';
+  const scale = document.createElement('input');
+  scale.type = 'range'; scale.min = 50; scale.max = 200; scale.step = 5;
+  scale.id = 'gfx-scale';
+  scale.value = Math.round((Number(g.render_scale) || 1) * 100);
+  const out = document.createElement('output');
+  out.id = 'gfx-scale-value';
+  out.htmlFor = 'gfx-scale';
+  out.textContent = scale.value + '%';
+  scale.addEventListener('input', () => { out.textContent = scale.value + '%'; });
+  scale.addEventListener('change', () => {
+    settings.graphics = { ...settings.graphics, render_scale: Number(scale.value) / 100 };
+    applyGraphics();
+  });
+  scaleWrap.append(scale, out);
+  const sl = document.createElement('label');
+  sl.htmlFor = 'gfx-scale';
+  const sspan = document.createElement('span');
+  sspan.textContent = GS.renderScale;
+  sl.append(sspan, scaleWrap);
+  body.append(sl);
+
+  for (const [cat, tiers] of Object.entries(CATEGORIES)) {
+    const s = row(GS.cat[cat], selectEl([
+      ['preset', GS.fromPreset.replace('{tier}', tierName(presetTier(current.preset, cat)))],
+      ...tiers.map(t => [t, tierName(t)])
+    ]), 'gfx-' + cat);
+    s.dataset.gfxCategory = cat;
+    s.value = tiers.includes(g[cat]) ? g[cat] : 'preset';
+    s.addEventListener('change', () => {
+      const next = { ...settings.graphics };
+      if (s.value === 'preset') delete next[cat]; else next[cat] = s.value;
+      settings.graphics = next;
+      applyGraphics();
+    });
+  }
+
+  const check = (key, label, id, def) => {
+    const i = document.createElement('input');
+    i.type = 'checkbox';
+    i.checked = settings.graphics[key] === undefined ? def : !!settings.graphics[key];
+    i.addEventListener('change', () => {
+      settings.graphics = { ...settings.graphics, [key]: i.checked };
+      applyGraphics();
+    });
+    row(label, i, id);
+  };
+  check('adaptive', GS.adaptive, 'gfx-adaptive', true);
+  check('show_fps', GS.showFps, 'gfx-fps', false);
+
+  const summary = document.createElement('p');
+  summary.id = 'gfx-summary';
+  summary.className = 'small gfx-summary';
+  summary.setAttribute('aria-live', 'polite');
+  const note = document.createElement('p');
+  note.id = 'gfx-post-note';
+  note.className = 'small gfx-note';
+  note.textContent = GS.postNote;
+  note.hidden = true;
+  body.append(summary, note);
+  updateGraphicsInfo();
 }
 
 function applySettings() {
@@ -588,15 +760,20 @@ function applySettings() {
   audio.setMuted(settings.muted);
   document.body.classList.toggle('high-contrast', settings.highContrast);
   document.body.classList.toggle('large-text', settings.largeText);
+  document.body.classList.toggle('reduced-motion', !!settings.reducedMotion);
   if (renderer) {
     renderer.reducedMotion = settings.reducedMotion;
     renderer.cvdPalette = settings.cvdPalette;
-    if (renderer.tierName !== settings.quality || renderer.theme !== settings.theme) rebuildRenderer();
-    else if (session.state) {
-      renderer.applyBoard(session.state.board);
-      renderer.applyOffer(session.state.offer, session.selectedSlot);
+    if (renderer.theme !== settings.theme) rebuildRenderer();
+    else {
+      renderer.setGraphics(settings.graphics);
+      if (session.state) {
+        renderer.applyBoard(session.state.board);
+        renderer.applyOffer(session.state.offer, session.selectedSlot);
+      }
     }
   }
+  syncGfxAttrs();
 }
 
 function rebuildRenderer() {
@@ -604,7 +781,7 @@ function rebuildRenderer() {
   if (old) old.dispose();
   renderer = new Renderer($('gl'), {
     theme: settings.theme,
-    quality: settings.quality,
+    graphics: settings.graphics,
     reducedMotion: settings.reducedMotion,
     cvdPalette: settings.cvdPalette
   });
@@ -1614,13 +1791,25 @@ function wire() {
   click('btn-practice', () => showSetup('practice'));
   click('btn-learn', startLearn);
   click('btn-help', () => { buildHelp(); openOverlay('help-overlay'); });
-  click('btn-settings', () => { buildSettings(); openOverlay('settings-overlay'); });
+  click('btn-settings', openSettings);
 
   $('setup-back').addEventListener('click', () => { audio.playClick(); showScreen('title-screen'); });
 
   click('btn-pause', pauseGame);
   click('btn-resume', resumeGame);
-  click('btn-pause-settings', () => { buildSettings(); openOverlay('settings-overlay'); });
+  click('btn-pause-settings', openSettings);
+  $('settings-tab-general').textContent = GS.tabGeneral;
+  $('settings-tab-graphics').textContent = GS.tabGraphics;
+  for (const t of ['general', 'graphics']) {
+    $('settings-tab-' + t).addEventListener('click', () => { audio.playClick(); setSettingsTab(t); });
+  }
+  $('settings-tabs').addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const next = $('settings-tab-general').getAttribute('aria-selected') === 'true' ? 'graphics' : 'general';
+    setSettingsTab(next);
+    $('settings-tab-' + next).focus();
+  });
   click('btn-pause-help', () => { buildHelp(); openOverlay('help-overlay'); });
   click('btn-quit', () => {
     closeOverlay('pause-overlay');
@@ -1686,7 +1875,7 @@ async function boot() {
   // WebGL capability check with clear compatibility message.
   try {
     renderer = new Renderer($('gl'), {
-      theme: settings.theme, quality: settings.quality,
+      theme: settings.theme, graphics: settings.graphics,
       reducedMotion: settings.reducedMotion, cvdPalette: settings.cvdPalette
     });
   } catch (e) {
@@ -1696,6 +1885,7 @@ async function boot() {
       'Your settings and progress are preserved; the game needs 3D support to render the board.';
     $('title-screen').append(p);
   }
+  syncGfxAttrs();
 
   appState = 'title';
   showScreen('title-screen');

@@ -8,7 +8,7 @@
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
     "test:e2e": "node tests/e2e.mjs",
-    "check": "node --check server.js && node --check src/rules.js && node --check src/content.js && node --check src/audio.js && node --check src/render.js && node --check src/main.js"
+    "check": "node --check server.js && node --check src/rules.js && node --check src/content.js && node --check src/audio.js && node --check src/render.js && node --check src/gfx.js && node --check src/gfx-i18n.js && node --check src/main.js"
   },
   "keywords": [
     "game",
