@@ -1,4 +1,5 @@
 name=Prism Parcel
+description=Fit block shapes onto a ten-by-ten grid and complete rows and columns to keep space for new pieces.
 launch=index.html
 owner=2712e04e-461b-4d23-81ae-e40b429128a8
 server=server.js
