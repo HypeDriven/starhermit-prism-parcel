@@ -157,6 +157,8 @@ body.large-text{font-size:120%}
 } }
 </script>
 <script src="browser-guard.js"></script>
+<script src="starhermit-sdk.js"></script>
+<script>StarHermit.init();</script>
 </head>
 <body>
 <a class="skip-link" href="#playfield">Skip to game</a>
@@ -174,9 +176,12 @@ body.large-text{font-size:120%}
       <button id="btn-learn">Learn to Play</button>
       <button id="btn-help">Help &amp; Rules</button>
       <button id="btn-settings">Settings</button>
+      <button id="btn-invite" hidden>Invite a friend</button>
+      <button id="btn-signin" hidden>Sign in with StarHermit</button>
     </nav>
     <p class="small" id="title-progress"></p>
     <p class="small" id="title-profile"></p>
+    <p class="small" id="title-account-note" role="status" hidden></p>
     <p class="small" id="title-clock"></p>
   </section>
 

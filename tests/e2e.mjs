@@ -9,9 +9,8 @@
  *
  * The repo's server.js is the StarHermit authoritative game server (writes to
  * data/), so this test embeds its own minimal static file server on an
- * ephemeral port. The game is fully playable offline; the platform adapter
- * treats the missing /api routes as "offline mode", which produces one benign
- * console resource error for /api/v1/time that is filtered out explicitly.
+ * ephemeral port. Standalone (no launch token) the game must make zero
+ * same-origin /api or /ws requests and log no console errors.
  *
  * Gameplay is keyboard-driven (documented on-screen controls): the visible
  * Hint button selects a legal placement and moves the cursor there, then
@@ -50,14 +49,17 @@ const server = http.createServer(async (req, res) => {
 const browserNoise = /GL Driver Message|GPU stall due to ReadPixels|Automatic fallback to software WebGL|EnableWebGLDeveloperExtensions/i;
 
 const errors = [];
+const ownServerCalls = [];
 function watchPage(page) {
+  page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (u.hostname === '127.0.0.1' && /^\/(api|ws)(\/|$)/.test(u.pathname)) ownServerCalls.push(u.pathname);
+  });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     if (m.type() !== 'error' && m.type() !== 'warning') return;
     const text = m.text();
     if (browserNoise.test(text)) return;
-    // Offline mode by design: the static test server has no /api routes.
-    if (text.includes('Failed to load resource') && (m.location()?.url || '').includes('/api/')) return;
     errors.push(`console: ${text}`);
   });
 }
@@ -281,6 +283,8 @@ try {
   if (errors.length) throw new Error('page errors after desktop pass:\n' + errors.join('\n'));
   await runPass('mobile', { width: 390, height: 844 }, true, baseURL);
   if (errors.length) throw new Error('page errors:\n' + errors.join('\n'));
+  if (ownServerCalls.length) throw new Error('standalone made own-server requests: ' + ownServerCalls.join(', '));
+  console.log('ok - standalone load made zero same-origin /api or /ws requests');
   console.log('\nE2E PASS — full playthrough clean on desktop + mobile, no page errors');
 } finally {
   server.close();

@@ -8,17 +8,19 @@
 
 import {
   BOARD_SIZE, OFFER_COUNT, pieceById, initialState, applyCommand, validateCommand,
-  findHint, serializeState, parseState, makeReplay, PIECES
+  findHint, serializeState, parseState, PIECES
 } from './rules.js';
 import {
   STAGES, stageInfo, stageCount, THEMES, themeInfo, DIFFICULTIES, DIFFICULTY_INFO,
   dailyRuleset, utcDateStr, practiceOptions, TUTORIAL_STEPS, ACHIEVEMENTS,
-  MASTERY_TIERS, CONTENT_VERSION
+  MASTERY_TIERS
 } from './content.js';
 import { Renderer } from './render.js';
 import { PRESETS, CATEGORIES, presetTier, resolve as resolveGfx, choosePreset } from './gfx.js';
 import { gfxStrings } from './gfx-i18n.js';
 import * as audio from './audio.js';
+import { platform } from './platform.js';
+import { currentPlatformStrings } from './platform-i18n.js';
 
 const $ = id => document.getElementById(id);
 
@@ -65,141 +67,12 @@ const progress = loadJSON(PROGRESS_KEY, {
   totalPlaced: 0, dailyBest: {}, friends: []
 });
 
-function persistSettings() { saveJSON(SETTINGS_KEY, settings); scheduleCloudSave(); }
+function persistSettings() { saveJSON(SETTINGS_KEY, settings); scheduleCloudSave(); platform.syncSettings(prefs()); }
 function persistProgress() { saveJSON(PROGRESS_KEY, progress); scheduleCloudSave(); }
 
 /* ================================================================== */
-/* Platform adapter — launch token, profile, cloud save, boards       */
+/* Platform glue — adapter in src/platform.js (StarHermit SDK)        */
 /* ================================================================== */
-
-// Minimal ZIP writer/reader (stored entries only, no compression).
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
-function crc32(bytes) {
-  let c = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-function zipStore(name, dataBytes) {
-  const enc = new TextEncoder();
-  const nameB = enc.encode(name);
-  const crc = crc32(dataBytes);
-  const out = [];
-  const u16 = (v) => out.push(v & 0xff, (v >> 8) & 0xff);
-  const u32 = (v) => out.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff);
-  u32(0x04034b50); u16(20); u16(0); u16(0); u16(0); u16(0);
-  u32(crc); u32(dataBytes.length); u32(dataBytes.length);
-  u16(nameB.length); u16(0);
-  const local = out.length;
-  const head = new Uint8Array(out);
-  const cd = [];
-  const c16 = (v) => cd.push(v & 0xff, (v >> 8) & 0xff);
-  const c32 = (v) => cd.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff);
-  c32(0x02014b50); c16(20); c16(20); c16(0); c16(0); c16(0); c16(0);
-  c32(crc); c32(dataBytes.length); c32(dataBytes.length);
-  c16(nameB.length); c16(0); c16(0); c16(0); c16(0); c32(0); c32(0); // attrs + local-header offset
-  const cdHead = new Uint8Array(cd);
-  const cdOff = head.length + nameB.length + dataBytes.length;
-  const parts = [head, nameB, dataBytes, cdHead, nameB];
-  const eocd = [];
-  const e32 = (v) => eocd.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff);
-  const e16 = (v) => eocd.push(v & 0xff, (v >> 8) & 0xff);
-  e32(0x06054b50); e16(0); e16(0); e16(1); e16(1);
-  e32(cdHead.length + nameB.length); e32(cdOff); e16(0);
-  parts.push(new Uint8Array(eocd));
-  const total = parts.reduce((n, p) => n + p.length, 0);
-  const buf = new Uint8Array(total);
-  let o = 0;
-  for (const p of parts) { buf.set(p, o); o += p.length; }
-  return buf;
-}
-function unzipFirstEntry(zipBytes) {
-  // Stored single-entry reader: scan local headers for compression 0.
-  const dv = new DataView(zipBytes.buffer, zipBytes.byteOffset, zipBytes.byteLength);
-  let off = 0;
-  while (off + 30 <= zipBytes.length && dv.getUint32(off, true) === 0x04034b50) {
-    const method = dv.getUint16(off + 8, true);
-    const size = dv.getUint32(off + 18, true);
-    const nameLen = dv.getUint16(off + 26, true);
-    const extraLen = dv.getUint16(off + 28, true);
-    const dataOff = off + 30 + nameLen + extraLen;
-    if (method !== 0) throw new Error('unsupported zip entry');
-    return zipBytes.slice(dataOff, dataOff + size);
-  }
-  throw new Error('bad zip');
-}
-function bytesToBase64(bytes) {
-  let s = '';
-  for (let i = 0; i < bytes.length; i += 0x8000)
-    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-}
-
-/** Decode a JWT payload (base64url, no signature verification). */
-function decodeJwtPayload(token) {
-  try {
-    const part = token.split('.')[1];
-    if (!part) return null;
-    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
-  } catch (e) { return null; }
-}
-
-/** Read the launch token exactly once. On-platform it arrives in the URL
- *  fragment (#game_token=<jwt>&session_id=…) and is stripped immediately;
- *  query-param fallbacks exist for local dev only. Returns null offline. */
-function readLaunchToken() {
-  let token = null;
-  try {
-    const hash = new URLSearchParams(location.hash.slice(1));
-    token = hash.get('game_token');
-    if (token) {
-      history.replaceState(null, '', location.pathname + location.search);
-    } else {
-      const q = new URLSearchParams(location.search);
-      token = q.get('token') || q.get('launch') || q.get('game_token');
-    }
-  } catch (e) { token = null; }
-  if (!token) return null;
-  const payload = decodeJwtPayload(token);
-  if (!payload || !payload.sub) return null;
-  return {
-    token,
-    sub: String(payload.sub),
-    gameScope: payload.game_scope ? String(payload.game_scope) : null
-  };
-}
-
-const profileCache = new Map(); // userId -> Promise<string | null> (raw nickname)
-/** Resolve a user id to a display nickname via the profile route; falls
- *  back to "Player " + id8. NEVER /api/v1/me, never usernames. */
-function profileName(userId) {
-  const id = String(userId || '');
-  if (!id) return Promise.resolve('Player');
-  if (!profileCache.has(id)) {
-    profileCache.set(id, (async () => {
-      try {
-        const res = await fetch('/api/v1/users/' + encodeURIComponent(id) + '/profile',
-          { headers: platform.authHeaders(), cache: 'no-store' });
-        if (!res.ok) return null;
-        const p = await res.json();
-        return p && typeof p.nickname === 'string' && p.nickname ? p.nickname : null;
-      } catch (e) { return null; }
-    })());
-  }
-  return profileCache.get(id).then(n => n || 'Player ' + id.slice(0, 8));
-}
-
-/* --------------------------- cloud save --------------------------- */
-
-let cloudTimer = 0;
 
 function buildSaveDoc() {
   return {
@@ -236,228 +109,32 @@ function applySaveDoc(doc) {
 }
 
 /** Mirror the local cache to the platform cloud-save slot, debounced ~2 s. */
-function scheduleCloudSave() {
-  if (!platform.hosted) return;
-  clearTimeout(cloudTimer);
-  cloudTimer = setTimeout(() => { platform.saveCloud(false); }, 2000);
+function scheduleCloudSave() { platform.scheduleCloudSave(); }
+
+/** Player preferences mirrored to the StarHermit settings KV. */
+function prefs() {
+  const out = {};
+  for (const k of Object.keys(DEFAULT_SETTINGS)) out[k] = settings[k];
+  return out;
 }
 
-function setSyncState(state) {
-  platform.syncState = state;
-  updateTitleProfile();
-}
-
-const platform = {
-  serverOffset: 0, // server time minus client time (ms); dev-server sync only
-  online: false,
-  hosted: false,  // true iff a launch token was read from the URL
-  token: null,
-  userId: null,   // JWT sub
-  gameSlug: null, // JWT game_scope (never hard-coded)
-  nickname: null,
-  serverApi: false, // true only when the game's own dev server answers /api/v1/health
-  syncState: 'offline', // offline | syncing | synced | error
-  refreshTimer: 0,
-  gameInfoCache: null,
-
-  authHeaders(extra) {
-    const h = { ...(extra || {}) };
-    if (this.token) h.Authorization = 'Bearer ' + this.token;
-    return h;
-  },
-
-  /** Display name: profile nickname, else "Player " + id8. */
-  displayName() {
-    if (this.nickname) return this.nickname;
-    if (this.userId) return 'Player ' + this.userId.slice(0, 8);
-    return 'Player';
-  },
-
-  now() { return Date.now() + this.serverOffset; },
-
-  /** Time sync against the game's own dev server (local play only).
-   *  The platform serves no time endpoint reachable by launch tokens;
-   *  hosted mode relies on the device clock. */
-  async syncTime() {
-    if (this.hosted) { this.online = true; return; }
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 6000);
-      const t0 = Date.now();
-      const res = await fetch('/api/v1/time', { cache: 'no-store', signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!res.ok) throw new Error('http-' + res.status);
-      const r = await res.json();
-      const t1 = Date.now();
-      if (typeof r.now === 'number') {
-        this.serverOffset = r.now - (t0 + (t1 - t0) / 2);
-        this.online = true;
-      }
-    } catch (e) { this.online = false; }
-  },
-
-  /** Detect the game's own dev server (npm start) so local play can use its
-   *  validated daily board and achievement mirror. Hosted features never
-   *  depend on this probe; every call below fails over gracefully. */
-  async probeDevServer() {
-    if (this.hosted) { this.serverApi = false; return; }
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 6000);
-      const res = await fetch('/api/v1/health', { cache: 'no-store', signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!res.ok) return;
-      const h = await res.json();
-      this.serverApi = !!(h && h.ok && typeof h.rulesVersion === 'number');
-    } catch (e) { this.serverApi = false; }
-  },
-
-  /* ---- launch-token refresh (60 min lifetime) ---- */
-
-  scheduleRefresh(delay = 45 * 60 * 1000) {
-    if (!this.hosted || !this.gameSlug) return;
-    clearTimeout(this.refreshTimer);
-    this.refreshTimer = setTimeout(() => { this.refreshToken(); }, delay);
-  },
-
-  async refreshToken() {
-    try {
-      const res = await fetch('/api/v1/games/' + encodeURIComponent(this.gameSlug) + '/launch-token', {
-        method: 'POST', headers: this.authHeaders()
-      });
-      if (!res.ok) throw new Error('http-' + res.status);
-      const body = await res.json().catch(() => null);
-      if (body && typeof body.token === 'string' && body.token) this.token = body.token;
-      this.scheduleRefresh();
-    } catch (e) { this.scheduleRefresh(60 * 1000); }
-  },
-
-  /* ---- identity ---- */
-
-  async loadProfile() {
-    if (!this.hosted || !this.userId) return;
-    const name = await profileName(this.userId);
-    if (name) this.nickname = name;
-    updateTitleProfile();
-  },
-
-  /* ---- cloud save (localStorage stays the offline cache) ---- */
-
-  async loadCloud() {
-    if (!this.hosted || !this.gameSlug) return;
-    setSyncState('syncing');
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 10000);
-      const res = await fetch('/api/v1/me/cloud-saves/' + encodeURIComponent(this.gameSlug),
-        { headers: this.authHeaders(), cache: 'no-store', signal: ctrl.signal });
-      clearTimeout(timer);
-      if (res.status === 404) { setSyncState('synced'); return; } // no remote save yet
-      if (!res.ok) throw new Error('http-' + res.status);
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      const doc = JSON.parse(new TextDecoder().decode(unzipFirstEntry(bytes)));
-      applySaveDoc(doc);
-      setSyncState('synced');
-    } catch (e) { setSyncState('offline'); }
-  },
-
-  async saveCloud(flush) {
-    if (!this.hosted || !this.gameSlug) return;
-    clearTimeout(cloudTimer);
-    setSyncState('syncing');
-    try {
-      const doc = JSON.stringify(buildSaveDoc());
-      const zip = zipStore('prism-parcel-save.json', new TextEncoder().encode(doc));
-      const res = await fetch('/api/v1/me/cloud-saves/' + encodeURIComponent(this.gameSlug), {
-        method: 'PUT',
-        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ dataBase64: bytesToBase64(zip) }),
-        ...(flush ? { keepalive: true } : {})
-      });
-      if (!res.ok) throw new Error('http-' + res.status);
-      setSyncState('synced');
-    } catch (e) { setSyncState('offline'); }
-  },
-
-  /* ---- daily board + submission ---- */
-
-  /** Clients can never submit to a platform leaderboard (script-owned).
-   *  Hosted: no submission — the day's best is kept locally and mirrored
-   *  via the cloud save. Local dev: validated replay goes to the game's
-   *  own server when present. */
-  async submitDaily(entry) {
-    if (this.hosted) return { ok: false, hosted: true };
-    if (!this.serverApi) return { ok: false, error: 'offline' };
-    try {
-      const res = await fetch('/api/v1/daily/score', {
-        method: 'POST',
-        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(entry)
-      });
-      const body = await res.json().catch(() => null);
-      return body && typeof body === 'object' ? body : { ok: false, error: 'http-' + res.status };
-    } catch (e) { return { ok: false, error: 'offline' }; }
-  },
-
-  async dailyBoard(date) {
-    if (this.hosted) return this.platformBoard();
-    if (!this.serverApi) return { ok: false, entries: [] };
-    try {
-      const res = await fetch('/api/v1/daily/leaderboard?date=' + encodeURIComponent(date), { cache: 'no-store' });
-      if (!res.ok) return { ok: false, entries: [] };
-      return await res.json();
-    } catch (e) { return { ok: false, entries: [] }; }
-  },
-
-  /** Read-only platform leaderboard (hosted mode): resolve entry user ids
-   *  to nicknames via the profile helper. */
-  async platformBoard() {
-    try {
-      const info = await this.gameInfo();
-      const lid = info && info.leaderboardId;
-      if (!lid) return { ok: true, entries: [], localOnly: true };
-      const res = await fetch('/api/v1/leaderboards/' + encodeURIComponent(lid) +
-        '/entries?page=1&pageSize=8', { headers: this.authHeaders(), cache: 'no-store' });
-      if (!res.ok) throw new Error('http-' + res.status);
-      const body = await res.json();
-      const list = (body && (body.entries || body.items)) || [];
-      const entries = [];
-      for (const e of list.slice(0, 8)) {
-        const uid = e.userId || e.user_id || e.id;
-        entries.push({
-          name: await profileName(uid),
-          score: e.score != null ? e.score : (e.value != null ? e.value : 0)
-        });
-      }
-      return { ok: true, entries };
-    } catch (e) { return { ok: false, entries: [] }; }
-  },
-
-  async gameInfo() {
-    if (this.gameInfoCache !== null) return this.gameInfoCache || null;
-    try {
-      const res = await fetch('/api/v1/games/' + encodeURIComponent(this.gameSlug),
-        { headers: this.authHeaders(), cache: 'no-store' });
-      if (!res.ok) throw new Error('http-' + res.status);
-      this.gameInfoCache = await res.json();
-    } catch (e) { this.gameInfoCache = null; }
-    return this.gameInfoCache;
-  },
-
-  /** Achievements are local (part of the cloud-saved progress doc) — this
-   *  game has no Jint game script. In local dev, mirror unlocks to the
-   *  game's own server when it is present; best-effort. */
-  async unlockAchievement(key) {
-    if (this.hosted || !this.serverApi) return;
-    try {
-      await fetch('/api/v1/achievements', {
-        method: 'POST',
-        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ key, player: this.userId || 'guest' })
-      });
-    } catch (e) { /* local unlock is authoritative; mirror retried on next unlock */ }
+/** Platform settings KV wins over the local cache for known keys. */
+async function applyRemoteSettings() {
+  const remote = await platform.loadRemoteSettings();
+  let changed = false;
+  for (const [k, v] of Object.entries(remote)) {
+    if (!(k in DEFAULT_SETTINGS) || v == null || typeof v !== typeof DEFAULT_SETTINGS[k]) continue;
+    if (JSON.stringify(settings[k]) === JSON.stringify(v)) continue;
+    settings[k] = v;
+    changed = true;
   }
-};
+  if (changed) {
+    migrateGraphics(settings);
+    saveJSON(SETTINGS_KEY, settings);
+    applySettings();
+  }
+  platform.syncSettings(prefs());
+}
 
 /* ================================================================== */
 /* Session — one active round                                         */
@@ -886,7 +563,6 @@ function checkAchievements(s) {
     audio.playAchievement();
     caption('achievement');
     announce(`Achievement unlocked: ${ACHIEVEMENTS.find(a => a.key === key).name}`, true);
-    platform.unlockAchievement(key);
   };
   if (s.over) unlock('first_completion');
   if (session.maxLines >= 3) unlock('mechanic_mastery');
@@ -898,30 +574,14 @@ function checkAchievements(s) {
   if (progress.totalPlaced >= 500) unlock('long_term_goal');
 }
 
-async function submitDailyScore() {
-  const replay = makeReplay(session.options, session.commands, session.state);
-  const entry = {
-    date: session.dailyDate,
-    contentVersion: CONTENT_VERSION,
-    seed: session.options.seed,
-    settings: { maxTier: session.options.maxTier },
-    replay,
-    elapsedMs: elapsedTime(),
-    name: platform.displayName()
-  };
-  const res = await platform.submitDaily(entry);
-  const el = $('results-compare');
-  if (res && res.ok) {
-    el.textContent = `Daily rank: #${res.rank} of ${res.count} (validated ✓)`;
-    refreshDailyBoard();
-  } else if (res && res.hosted) {
-    // Platform boards are script-owned — clients cannot submit. The day's
-    // best lives in progress and is mirrored by the cloud save.
-    el.textContent = `Daily complete — best today: ${progress.dailyBest[session.dailyDate] || '—'} (saved to your account).`;
-    refreshDailyBoard();
-  } else {
-    el.textContent = 'Daily score saved locally — server validation unavailable (casual board).';
-  }
+function submitDailyScore() {
+  // Platform boards are script-owned — clients never submit. The day's best
+  // lives in progress (mirrored by the cloud save when signed in).
+  const best = progress.dailyBest[session.dailyDate] || '—';
+  $('results-compare').textContent = platform.hosted
+    ? `Daily complete — best today: ${best} (saved to your account).`
+    : `Daily complete — best today: ${best} (saved on this device).`;
+  if (platform.hosted) refreshDailyBoard();
 }
 
 function elapsedTime() {
@@ -1160,7 +820,10 @@ async function refreshDailyBoard() {
   const res = await platform.dailyBoard(session.dailyDate);
   if (!el.isConnected) return;
   if (res.ok && res.localOnly) {
-    el.textContent = `Platform board unavailable — your best today: ${progress.dailyBest[session.dailyDate] || '—'}.`;
+    const best = progress.dailyBest[session.dailyDate] || '—';
+    el.textContent = platform.hosted
+      ? `Platform board unavailable — your best today: ${best}.`
+      : `Your best today: ${best} (local).`;
     return;
   }
   if (!res.ok || !res.entries.length) {
@@ -1467,6 +1130,7 @@ function showResults() {
 
 function buildHelp() {
   const body = $('help-body');
+  const keys = (a) => (bindings[a] || []).map(keyLabel).join('/');
   body.innerHTML = `
     <h3>The rules</h3>
     <ul>
@@ -1478,7 +1142,7 @@ function buildHelp() {
     <h3>Controls</h3>
     <ul>
       <li><b>Pointer/touch:</b> tap a piece in the tray, then tap a board cell — or drag from the tray onto the board.</li>
-      <li><b>Keyboard:</b> 1–3 select a piece · arrow keys move the cursor · Enter/Space place · H hint · U undo (practice) · Esc pause.</li>
+      <li><b>Keyboard:</b> ${keys('slot_1')}–${keys('slot_3')} select a piece · ${keys('cursor_up')} ${keys('cursor_left')} ${keys('cursor_down')} ${keys('cursor_right')} move the cursor · ${keys('place')} place · ${keys('hint')} hint · ${keys('undo')} undo (practice) · ${keys('clear')} clear selection · ${keys('pause')} pause.</li>
       <li><b>Gamepad:</b> D-pad/stick moves the cursor, A places, B cancels, Start pauses.</li>
     </ul>
     <h3>Pieces</h3>
@@ -1511,6 +1175,8 @@ function updateTitleProgress() {
 function updateTitleProfile() {
   const el = $('title-profile');
   if (!el) return;
+  $('btn-signin').hidden = !platform.canSignIn();
+  $('btn-invite').hidden = !platform.inviteLink();
   if (platform.hosted) {
     const syncLabel = {
       syncing: 'Saving…', synced: 'Cloud save synced',
@@ -1523,14 +1189,9 @@ function updateTitleProfile() {
 }
 
 function updateTitleClock() {
-  const date = utcDateStr(platform.now());
-  if (platform.hosted) {
-    // No platform time endpoint for launch tokens: the device clock drives
-    // daily boundaries; identity and sync state live in #title-profile.
-    $('title-clock').textContent = `UTC day ${date}`;
-    return;
-  }
-  $('title-clock').textContent = `UTC day ${date}${platform.online ? ' · server time synced' : ' · offline mode'}`;
+  // The device clock drives daily boundaries; identity and sync state live
+  // in #title-profile.
+  $('title-clock').textContent = `UTC day ${utcDateStr(platform.now())}`;
 }
 
 /* ================================================================== */
@@ -1636,9 +1297,32 @@ function setupPointer() {
 /* Input — keyboard + gamepad                                         */
 /* ================================================================== */
 
+// Keyboard bindings (KeyboardEvent.code), declared as control.* in
+// starhermit.txt; the player's StarHermit overrides replace these when signed in.
+const DEFAULT_BINDINGS = {
+  cursor_up: ['ArrowUp'], cursor_down: ['ArrowDown'], cursor_left: ['ArrowLeft'], cursor_right: ['ArrowRight'],
+  slot_1: ['Digit1', 'Numpad1'], slot_2: ['Digit2', 'Numpad2'], slot_3: ['Digit3', 'Numpad3'],
+  place: ['Enter', 'NumpadEnter', 'Space'],
+  hint: ['KeyH'], undo: ['KeyU'], clear: ['KeyC'], pause: ['Escape'],
+};
+let bindings = JSON.parse(JSON.stringify(DEFAULT_BINDINGS));
+function actionFor(code) {
+  for (const [a, codes] of Object.entries(bindings)) if (codes.includes(code)) return a;
+  return null;
+}
+function keyLabel(code) {
+  const named = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc', Space: 'Space', NumpadEnter: 'Num Enter' };
+  if (named[code]) return named[code];
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit\d$/.test(code)) return code.slice(5);
+  if (/^Numpad\d$/.test(code)) return 'Num ' + code.slice(6);
+  return String(code).replace(/[^\w ]/g, '');
+}
+
 function setupKeyboard() {
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
+    const action = actionFor(e.code);
+    if (action === 'pause' || (e.key === 'Escape' && !action)) {
       if (!$('settings-overlay').hidden) { closeOverlay('settings-overlay'); return; }
       if (!$('help-overlay').hidden) { closeOverlay('help-overlay'); return; }
       if (!$('pause-overlay').hidden) { resumeGame(); return; }
@@ -1650,16 +1334,16 @@ function setupKeyboard() {
 
     const cur = session.cursor;
     let handled = true;
-    switch (e.key) {
-      case 'ArrowUp': cur.row = Math.max(0, cur.row - 1); break;
-      case 'ArrowDown': cur.row = Math.min(BOARD_SIZE - 1, cur.row + 1); break;
-      case 'ArrowLeft': cur.col = Math.max(0, cur.col - 1); break;
-      case 'ArrowRight': cur.col = Math.min(BOARD_SIZE - 1, cur.col + 1); break;
-      case '1': case '2': case '3': selectSlot(Number(e.key) - 1); break;
-      case 'Enter': case ' ': commitAt(cur.row, cur.col); break;
-      case 'h': case 'H': doHint(); break;
-      case 'u': case 'U': doUndo(); break;
-      case 'c': case 'C': renderer.hideGhost(); session.selectedSlot = null; renderer.setSelectedSlot(null); buildOfferTray(); break;
+    switch (action) {
+      case 'cursor_up': cur.row = Math.max(0, cur.row - 1); break;
+      case 'cursor_down': cur.row = Math.min(BOARD_SIZE - 1, cur.row + 1); break;
+      case 'cursor_left': cur.col = Math.max(0, cur.col - 1); break;
+      case 'cursor_right': cur.col = Math.min(BOARD_SIZE - 1, cur.col + 1); break;
+      case 'slot_1': case 'slot_2': case 'slot_3': selectSlot(Number(action.slice(-1)) - 1); break;
+      case 'place': commitAt(cur.row, cur.col); break;
+      case 'hint': doHint(); break;
+      case 'undo': doUndo(); break;
+      case 'clear': renderer.hideGhost(); session.selectedSlot = null; renderer.setSelectedSlot(null); buildOfferTray(); break;
       default: handled = false;
     }
     if (handled) {
@@ -1844,24 +1528,50 @@ function wire() {
 }
 
 /* ================================================================== */
+/* StarHermit account buttons                                         */
+/* ================================================================== */
+
+function wirePlatform() {
+  const t = currentPlatformStrings();
+  const note = (msg) => { const el = $('title-account-note'); el.textContent = msg; el.hidden = false; };
+  $('btn-signin').textContent = t.signIn;
+  $('btn-invite').textContent = t.invite;
+  $('btn-signin').addEventListener('click', () => platform.signIn());
+  $('btn-invite').addEventListener('click', async () => {
+    const link = platform.inviteLink();
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      note(t.inviteCopied);
+    } catch (e) {
+      note(t.inviteFailed.replace('{link}', link));
+    }
+  });
+  platform.onAuthChange = ({ signedIn }) => {
+    if (!signedIn) note(t.signedOut);
+    updateTitleProfile();
+  };
+}
+
+/* ================================================================== */
 /* Boot                                                               */
 /* ================================================================== */
 
 async function boot() {
   appState = 'boot';
 
-  // Launch token first: hosted mode activates iff a token was read.
-  const launch = readLaunchToken();
-  if (launch) {
-    platform.hosted = true;
-    platform.online = true;
-    platform.token = launch.token;
-    platform.userId = launch.sub;
-    platform.gameSlug = launch.gameScope;
-    platform.scheduleRefresh();
-    platform.loadProfile();
-    try { await platform.loadCloud(); } catch (e) { /* local cache remains authoritative offline */ }
+  // Launch token first (StarHermit SDK): hosted mode iff the SDK holds one.
+  platform.docProvider = buildSaveDoc;
+  platform.onSyncChange = updateTitleProfile;
+  platform.init();
+  wirePlatform();
+  if (platform.hosted) {
+    platform.loadProfile().then(updateTitleProfile);
+    const doc = await platform.loadCloud();
+    if (doc) applySaveDoc(doc);
+    await applyRemoteSettings();
   }
+  platform.loadBindings(DEFAULT_BINDINGS).then((b) => { bindings = b; buildHelp(); });
 
   applySettings();
   wire();
@@ -1903,18 +1613,10 @@ async function boot() {
     startRound('journey', { seed: st.seed, maxTier: st.maxTier, goal: { ...st.goal }, moveLimit: st.moveLimit }, { stageId: st.id });
   }
 
-  if (platform.hosted) {
-    updateTitleClock();
-    // A direct-launched daily round renders its board through the read-only
-    // platform leaderboard (gameInfo/platformBoard are token-authed).
-    if (session.mode === 'daily') refreshDailyBoard();
-  } else {
-    // Local play: the game's own dev server (npm start) optionally provides
-    // time sync, a validated daily board and an achievement mirror.
-    platform.syncTime().then(updateTitleClock);
-    platform.probeDevServer().then(() => { if (session.mode === 'daily') refreshDailyBoard(); });
-    setInterval(() => platform.syncTime().then(updateTitleClock), 5 * 60 * 1000);
-  }
+  updateTitleClock();
+  // A direct-launched daily round renders its board (read-only platform
+  // leaderboard when signed in, the local best otherwise).
+  if (session.mode === 'daily') refreshDailyBoard();
   lastFrame = performance.now();
   rafId = requestAnimationFrame(frame);
 }
