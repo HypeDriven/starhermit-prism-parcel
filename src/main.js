@@ -203,7 +203,10 @@ function openOverlay(id) {
   el.hidden = false;
   el.dataset.returnFocus = document.activeElement && document.activeElement.id || '';
   const first = el.querySelector('button');
-  first && first.focus();
+  // preventScroll + reset: a low first button must not scroll the heading
+  // away; overlays always open at their top.
+  first && first.focus({ preventScroll: true });
+  for (const n of [el, ...el.querySelectorAll('*')]) if (n.scrollTop) n.scrollTop = 0;
 }
 
 function closeOverlay(id) {
