@@ -481,6 +481,9 @@ function startRound(mode, options, meta = {}) {
   session.stageId = meta.stageId || null;
   session.dailyDate = meta.dailyDate || null;
   session.tutorialStep = 0;
+  // A lesson card left over from an abandoned Learn round must not cover the next round's board.
+  const staleCard = $('tutorial-card');
+  if (staleCard) staleCard.remove();
   session.selectedSlot = null;
   session.cursor = { row: 4, col: 4 };
   session.over = false;
@@ -944,7 +947,7 @@ function showTutorialStep(i) {
     card = document.createElement('div');
     card.id = 'tutorial-card';
     card.className = 'card';
-    card.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);top:calc(3.5rem + var(--sat));z-index:10;max-width:min(420px,90vw);background:rgba(20,26,51,.92)';
+    card.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);top:calc(3.5rem + var(--sat));z-index:10;max-width:min(420px,calc(90vw / var(--ui-scale,1)));background:rgba(20,26,51,.92)';
     $('playfield').append(card);
   }
   card.innerHTML = `<h3>${i + 1}/${TUTORIAL_STEPS.length} — ${step.title}</h3><p>${step.text}</p>`;
