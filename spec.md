@@ -132,6 +132,7 @@ The key directional light casts PCF shadows from a frustum fitted to the board a
 - Camera transitions use authored duration/easing or critically damped springs and remain interruptible. Never animate by cumulative per-frame lerp.
 - Decorative motion is paused or reduced when hidden. Gameplay animation derives from simulation state and interpolation alpha, not frame count.
 - Camera shake is low-amplitude, event-tiered, disabled by reduced motion, and never changes raycast truth.
+- Framing (`render.js resize()`): the free band is the canvas minus the HUD bar (and a lesson card centred over the board) at the top and the DOM offer tray at the bottom. Along the authored view direction (`FRAMING`: ~50° elevation, blending toward a steeper view as the band narrows below aspect 1) the camera distance is fitted so the board, plus the 3D offer row when shown, spans 94% of the band in its limiting axis, and a view offset centres it there; fog and far plane follow the fitted distance. The 3D offer row (slot spacing 3.7) shows only when the canvas is at least 0.8 wide per unit height and 520 px tall — on portrait and phone-landscape screens the DOM tray alone presents the offers and the board gets the band. The camera refits on resize and whenever the lesson card changes.
 
 ### Graphics-skill routing
 

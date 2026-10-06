@@ -33,8 +33,17 @@ const MOTES = 90;
 // Authored camera framing constants (no magic offsets elsewhere).
 export const FRAMING = Object.freeze({
   fov: 38,
-  distance: 16.5,
-  height: 13.5,
+  // authored view direction (~50° elevation); resize() fits the distance along it
+  distance: 14,
+  height: 16,
+  // narrow (portrait) bands blend toward a steeper view so the square board
+  // reads taller instead of a thin trapezoid across the width
+  steepDistance: 8,
+  steepHeight: 21,
+  // half extents of the 3D offer row the fit must keep on screen (slot spacing
+  // + a selected Grand Bar/Column, scaled 1.12)
+  offerHalfX: 5.65,
+  offerHalfZ: 1.95,
   lookAt: new THREE.Vector3(0, 0, 0.5),
   tiltLerp: 0.12
 });
@@ -743,7 +752,7 @@ export class Renderer {
     }
     this.offerViews = [null, null, null];
     const palette = this.palette();
-    const slotSpacing = 4.2;
+    const slotSpacing = 3.7; // two Grand Bars side by side still clear each other
     const detailed = this.q.detail === 'detailed';
     for (let i = 0; i < OFFER_COUNT; i++) {
       const slot = offer[i];
@@ -840,6 +849,7 @@ export class Renderer {
 
   /** Which offer slot (0..2) is at these pointer coords, or null. */
   pickOffer(ndcX, ndcY) {
+    if (!this.offerGroup.visible) return null; // hidden 3D row (portrait / short screens): the DOM tray picks
     this._raycaster.setFromCamera({ x: ndcX, y: ndcY }, this.camera);
     this._raycaster.layers.enableAll();
     const hits = this._raycaster.intersectObjects(this.offerGroup.children, true);
@@ -858,29 +868,83 @@ export class Renderer {
   resize() {
     this._applySize(true);
     const [w, h] = this.size;
-    // The DOM offer tray covers the bottom of the canvas: frame the board in
-    // the band above it (view offset), and view it more top-down on short
-    // screens so the far rows stay large enough to tap.
-    let trayH = 0;
-    const tray = typeof document !== 'undefined' ? document.getElementById('offer-tray') : null;
-    if (tray && tray.offsetParent) trayH = Math.min(h * 0.35, tray.getBoundingClientRect().height + 8);
-    const safeH = Math.max(120, h - trayH);
-    this.camera.aspect = w / safeH;
-    this.camera.setViewOffset(w, safeH, 0, 0, w, h);
-    // Keep the whole board framed in narrow viewports.
+    // Frame the play area in the band the DOM leaves free: below the HUD bar
+    // (and a lesson card centred over the board), above the offer tray.
+    let top = 0, bottom = 0;
+    if (typeof document !== 'undefined') {
+      const cr = this.canvas.getBoundingClientRect();
+      const rect = (id) => {
+        const el = document.getElementById(id);
+        if (!el || !el.offsetParent) return null;
+        const r = el.getBoundingClientRect();
+        return r.height ? r : null;
+      };
+      for (const id of ['hud-top', 'hud-actions', 'tutorial-card']) {
+        const r = rect(id);
+        if (!r) continue;
+        const b = r.bottom - cr.top;
+        // a lesson card parked in a side corner (short landscape) is not a top band
+        const centred = id !== 'tutorial-card' || (r.left - cr.left < w * 0.42 && r.right - cr.left > w * 0.58);
+        if (b < h * 0.5 && centred) top = Math.max(top, b + 6);
+      }
+      const t = rect('offer-tray');
+      if (t) bottom = Math.min(h * 0.35, cr.bottom - t.top + 6);
+    }
+    const safeH = Math.max(120, h - top - bottom);
     const aspect = w / safeH;
-    const fit = Math.min(1, aspect / 0.85);
+    // In narrow portrait frames the 3D offer pieces would render half off-screen,
+    // and on short (phone-landscape) screens they would take a third of the
+    // band from the board; the DOM offer tray already presents them, so hide
+    // the 3D duplicates there.
+    this.offerGroup.visible = w / h >= 0.8 && h >= 520;
+    // Authored view direction (more top-down on short screens so the far rows
+    // stay large enough to tap); the distance is then fitted so the board (and
+    // the 3D offer row when shown) fills the free band, and the view is offset
+    // so that content is centred in it.
     const short = h < 520;
-    const dist0 = short ? FRAMING.distance * 0.8 : FRAMING.distance;
-    const height0 = short ? FRAMING.height * 1.25 : FRAMING.height;
-    const d = dist0 / Math.max(0.62, fit);
-    const hh = height0 / Math.max(0.62, fit);
-    this.camera.position.set(0, hh, d);
-    this.camera.lookAt(FRAMING.lookAt);
-    // In narrow portrait frames the 3D offer pieces would render half off-screen;
-    // the DOM offer tray already presents them, so hide the 3D duplicates.
-    this.offerGroup.visible = w / h >= 0.8;
-    this.camera.updateProjectionMatrix();
+    const steep = Math.min(1, Math.max(0, (1 - aspect) / 0.4));
+    const H = FRAMING.height + (FRAMING.steepHeight - FRAMING.height) * steep;
+    const Dz = FRAMING.distance + (FRAMING.steepDistance - FRAMING.distance) * steep;
+    const dir = new THREE.Vector3(0, short ? H * 1.25 : H, short ? Dz * 0.8 : Dz).sub(FRAMING.lookAt);
+    const len0 = dir.length();
+    dir.normalize();
+    const R = BOARD_W / 2 + 0.45;
+    const pts = [];
+    for (const x of [-R, R]) for (const z of [-R, R]) for (const y of [0, 0.7]) pts.push(new THREE.Vector3(x, y, z));
+    if (this.offerGroup.visible) {
+      const ox = FRAMING.offerHalfX, oz = FRAMING.offerHalfZ;
+      for (const x of [-ox, ox]) for (const z of [OFFER_Z - oz, OFFER_Z + oz]) for (const y of [0, 1.2]) pts.push(new THREE.Vector3(x, y, z));
+    }
+    const cam = this.camera;
+    cam.clearViewOffset();
+    cam.aspect = aspect;
+    cam.updateProjectionMatrix();
+    const v = new THREE.Vector3();
+    const bounds = (dist) => {
+      cam.position.copy(FRAMING.lookAt).addScaledVector(dir, dist);
+      cam.lookAt(FRAMING.lookAt);
+      cam.updateMatrixWorld(true);
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const p of pts) {
+        v.copy(p).project(cam);
+        x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
+      }
+      return { x0, x1, y0, y1 };
+    };
+    const MARGIN = 0.94; // fraction of the band the content may span
+    const fits = (b) => b.x1 - b.x0 <= 2 * MARGIN && b.y1 - b.y0 <= 2 * MARGIN;
+    let lo = len0 * 0.3, hi = len0 * 6;
+    for (let i = 0; i < 28; i++) { const mid = (lo + hi) / 2; if (fits(bounds(mid))) hi = mid; else lo = mid; }
+    const b = bounds(hi);
+    // centre the content in the band: shift the view window by the content's
+    // NDC centre, and move the band below the top inset
+    const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+    cam.setViewOffset(w, safeH, cx * w / 2, -top - cy * safeH / 2, w, h);
+    // keep the authored fog band (26..60 at the authored ~21 distance) relative
+    // to the fitted distance, so a pulled-back portrait view is not fogged out
+    cam.far = Math.max(120, hi + 60);
+    cam.updateProjectionMatrix();
+    if (this.scene.fog) { this.scene.fog.near = hi + 26 - len0; this.scene.fog.far = hi + 60 - len0; }
     this.postKey = null;
   }
 

@@ -951,6 +951,7 @@ function showTutorialStep(i) {
     $('playfield').append(card);
   }
   card.innerHTML = `<h3>${i + 1}/${TUTORIAL_STEPS.length} — ${step.title}</h3><p>${step.text}</p>`;
+  renderer && renderer.resize(); // the camera frames the board below a centred lesson card
 }
 
 function advanceTutorial(cmd, gain) {
@@ -966,6 +967,7 @@ function advanceTutorial(cmd, gain) {
   if (next >= TUTORIAL_STEPS.length) {
     const card = $('tutorial-card');
     card && card.remove();
+    renderer && renderer.resize();
     session.tutorialStep = TUTORIAL_STEPS.length; // lessons done: resume must stay in 'active'
     appState = 'active';
     progress.tutorialDone = true;
