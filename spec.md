@@ -168,7 +168,7 @@ Follow the skill pack's acceptance gate: deterministic seeds, debug views for co
 - `ui`: responsive DOM shell, focus, localization, settings, overlays, accessibility mirror. Overlays open at their top (heading visible): focus moves in with `preventScroll`.
 - `audio`: buses, event mapping, focus/background behavior, decode and memory policy.
 - `content`: versioned levels, themes, tutorials, validation metadata.
-- `platform` (`src/platform.js`): adapter over the shared StarHermit SDK — launch token and renewal, sign-in, profile nickname, cloud save in slot `game:<slug>` (debounced + pagehide flush, localStorage offline cache), settings KV, keyboard bindings, invite link, read-only platform boards; offline-tolerant.
+- `platform` (`src/platform.js`): adapter over the shared StarHermit SDK — launch token and renewal, sign-in, profile nickname, cloud save in slot `game:<slug>` (debounced + pagehide flush, localStorage offline cache), settings KV, keyboard bindings, invite link, high-score leaderboard posting and top entries; offline-tolerant.
 - Files: `src/gfx.js` (pure quality model: presets, categories, `detectPreset`, `resolve`, `presetTier`, `choosePreset`, `describe`), `src/gfx-i18n.js` (Graphics panel strings), `src/render.js` (scene, `setGraphics`, `graphicsInfo`, post chain, adaptive resolution), `vendor/three/addons/` (r185 post-processing passes, shaders, `RoomEnvironment`, `RoundedBoxGeometry`, mapped as `three/addons/`), `tests/gfx.test.js` (quality model unit tests).
 
 No module may mutate rules state except through a validated command. Rendering consumes immutable snapshots plus interpolation data. UI state and simulation state are separate so closing a drawer cannot affect a match.
@@ -191,10 +191,10 @@ No module may mutate rules state except through a validated command. Rendering c
 ## 6. StarHermit integration
 
 ### Packaging and launch
-- The distribution has `starhermit.txt` at its root (`name=Prism Parcel`, `launch=index.html`, `server=server.js`, `control.*` lines). `index.html` loads the shared SDK `starhermit-sdk.js` (an unchanged copy of `tools/starhermit-sdk.js`) and calls `StarHermit.init()` before the game modules; `src/platform.js` is the game's adapter over `window.StarHermit`.
+- The distribution has `starhermit.txt` at its root (`name=Prism Parcel`, `launch=index.html`, `server=score-script.js`, `control.*` lines). `index.html` loads the shared SDK `starhermit-sdk.js` (an unchanged copy of `tools/starhermit-sdk.js`) and calls `StarHermit.init()` before the game modules; `src/platform.js` is the game's adapter over `window.StarHermit`.
 - The SDK reads `#game_token=` (library launch) or `#access_token=` (direct sign-in return), strips the launch fragment, takes the slug from the `game_scope` claim and renews the token via `POST /api/v1/games/{slug}/launch-token`. Tokens are never persisted. When renewal is refused the title notes that the player is signed out and play continues locally.
 - Without a token the game makes no network request at all (no StarHermit or own-server `/api`/`/ws` calls): device clock, local daily best and local achievements. On `<id>.starhermit.com` without a token the title shows **Sign in with StarHermit**, which redirects through the platform sign-in.
-- The repo's `server.js` is a standalone dev/test server; the client never calls its `/api` routes. Hosted and standalone play both use the device clock.
+- `score-script.js` (the `server=` platform script; canonical copy in the games repo's `tools/score-script.js`) only accepts score posts. The repo's `server.js` is a standalone dev/test server; the client never calls its `/api` routes. Hosted and standalone play both use the device clock.
 
 ### Identity, saves, preferences, controls
 - The title shows "Playing as <nickname>" (profile nickname, fallback `Player <id prefix>`) with the cloud-sync state.
@@ -205,7 +205,8 @@ No module may mutate rules state except through a validated command. Rendering c
 
 ### Achievements and leaderboards
 - Achievements are local and part of the cloud-saved progress doc; the platform has no server-declared achievements for this game.
-- Hosted, the daily board shows the game's first platform leaderboard read-only (nicknames resolved through profiles); the client never submits scores and the day's best stays in the cloud-saved progress. Standalone, the daily board shows only the local best.
+- Signed in, every finished Journey or Daily round posts its total through `StarHermit.submitScores` — a practice session whose `score-script.js` range-checks it and posts it to the `high-score` board (integer, higher is better, 0–1,000,000). The results screen shows "Leaderboard rank: #N" (or posted / not posted), localized in the nine locales (`src/platform-i18n.js`). Practice and Learn post nothing.
+- Hosted, the daily panel's board shows the top 8 of the `high-score` board (nicknames resolved through profiles); the day's best also stays in the cloud-saved progress. Standalone, nothing is posted and the daily board shows only the local best.
 
 ### Not used
 - Matchmaking, sessions, chat, friends picker, replays, realtime rooms and voice: the game is solo.

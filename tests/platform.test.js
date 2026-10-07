@@ -28,7 +28,7 @@ function install(href) {
     if (url.endsWith('/settings') && init.method === 'PATCH') { Object.assign(kv, JSON.parse(init.body).settings); return j({}); }
     if (url.endsWith('/settings')) return j({ settings: kv });
     if (url.endsWith('/controls')) return j({ actions: [{ action: 'hint', codes: ['KeyI'] }] });
-    if (url.endsWith('/leaderboards')) return j([{ id: 'lb', key: 'daily' }]);
+    if (url.endsWith('/leaderboards')) return j([{ id: 'lb', key: 'high-score' }]);
     if (url.startsWith('/api/v1/leaderboards/lb/entries')) return j({ items: [{ userId: 'user-other77', score: 321 }] });
     return r(404, '');
   };
@@ -83,6 +83,7 @@ test('standalone: no StarHermit request', async () => {
   assert.deepEqual(await platform.loadRemoteSettings(), {});
   assert.deepEqual(await platform.loadBindings({ hint: ['KeyH'] }), { hint: ['KeyH'] });
   assert.deepEqual(await platform.dailyBoard('2026-10-03'), { ok: true, entries: [], localOnly: true });
+  assert.deepEqual(await platform.submitScore(321), { posted: false, rank: null });
   assert.ok(Math.abs(platform.now() - Date.now()) < 50, 'local clock');
   assert.equal(h.calls.length, 0);
 });

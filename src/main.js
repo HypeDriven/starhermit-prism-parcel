@@ -560,6 +560,23 @@ function endRound() {
 
   if (s.won) { audio.playWin(); caption('win'); } else { audio.playOver(); caption('over'); }
   showResults();
+  postToLeaderboard(s);
+}
+
+// Signed in, Journey and Daily rounds: post the total to the high-score
+// board and show the player's rank on the results screen.
+function postToLeaderboard(s) {
+  const line = $('results-lb');
+  if (!platform.hosted || (session.mode !== 'journey' && session.mode !== 'daily')) { line.hidden = true; return; }
+  const t = currentPlatformStrings();
+  line.hidden = false;
+  line.textContent = t.lbPosting;
+  platform.submitScore(s.score.total).then((r) => {
+    if (session.state !== s) return;
+    line.textContent = !r.posted ? t.lbNotPosted
+      : r.rank ? t.lbRank.replace('{rank}', r.rank) : t.lbPosted;
+    if (session.mode === 'daily') refreshDailyBoard();
+  });
 }
 
 function checkAchievements(s) {
@@ -581,8 +598,8 @@ function checkAchievements(s) {
 }
 
 function submitDailyScore() {
-  // Platform boards are script-owned — clients never submit. The day's best
-  // lives in progress (mirrored by the cloud save when signed in).
+  // The day's best lives in progress (mirrored by the cloud save when signed
+  // in); the round itself is posted by postToLeaderboard.
   const best = progress.dailyBest[session.dailyDate] || '—';
   $('results-compare').textContent = platform.hosted
     ? `Daily complete — best today: ${best} (saved to your account).`

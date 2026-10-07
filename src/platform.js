@@ -2,7 +2,7 @@
  * (starhermit-sdk.js, loaded as a classic script before the game modules):
  * launch token + renewal, sign-in, account nickname, cloud save (slot
  * game:<slug>; localStorage stays the offline cache), per-player settings KV,
- * keyboard bindings, invite link and the read-only platform leaderboard.
+ * keyboard bindings, invite link and the high-score leaderboard.
  * Hosted mode is "the SDK holds a token"; without one the game makes no
  * network request at all (local clock, local daily best and achievements). */
 
@@ -123,19 +123,35 @@ export const platform = {
     return sdk().loadBindings(defaults).catch(copy);
   },
 
-  /* ---- daily board ---- */
+  /* ---- leaderboard ---- */
 
-  /** Clients never submit to a platform leaderboard; the day's best lives in
-   *  the (cloud-saved) progress doc. Standalone there is no board at all. */
+  /** Post a finished Journey/Daily round to the high-score board
+   *  (score-script.js); resolves { posted, rank } — rank may be null. */
+  async submitScore(total) {
+    if (!this.hosted) return { posted: false, rank: null };
+    const s = sdk();
+    try {
+      const keys = await s.submitScores({ 'high-score': total });
+      if (!keys || keys.indexOf('high-score') < 0) return { posted: false, rank: null };
+      try {
+        const r = await s.leaderboard('high-score', { pageSize: 100 });
+        const me = (r.items || []).find((i) => String(i.userId) === String(s.userId));
+        return { posted: true, rank: me ? me.rank : null };
+      } catch (e) { return { posted: true, rank: null }; }
+    } catch (e) { return { posted: false, rank: null }; }
+  },
+
+  /** The day's best lives in the (cloud-saved) progress doc; hosted, the
+   *  board panel shows the high-score board. Standalone there is no board. */
   async dailyBoard() {
     if (this.hosted) return this.platformBoard();
     return { ok: true, entries: [], localOnly: true };
   },
 
-  /** Read-only platform leaderboard (first board), nicknames resolved. */
+  /** The high-score board's top entries, nicknames resolved. */
   async platformBoard() {
     if (!this.hosted) return { ok: false, entries: [] };
-    const r = await sdk().leaderboard(null, { pageSize: 8 });
+    const r = await sdk().leaderboard('high-score', { pageSize: 8 });
     if (!r || !r.board) return { ok: true, entries: [], localOnly: true };
     const entries = [];
     for (const e of (r.items || []).slice(0, 8)) {
