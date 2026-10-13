@@ -32,7 +32,7 @@ function ensureCtx() {
       const g = ctx.createGain();
       g.gain.value = volumes[name] != null ? volumes[name] : 0.7;
       g.connect(ctx.destination);
-      buses[name] = g;
+      buses[name] = (globalThis.GameOptions ? globalThis.GameOptions.tagBus(g, name) : g);
     }
     return true;
   } catch (e) {
@@ -127,7 +127,7 @@ function playSample(event, pick = 0) {
   const name = names[pick % names.length];
   const entry = loadSample(name);
   if (entry.state !== 'ready') return false;
-  const src = ctx.createBufferSource();
+  const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), event) : ctx.createBufferSource());
   src.buffer = entry.buffer;
   src.connect(buses.effects);
   src.start();
@@ -141,7 +141,7 @@ function playSample(event, pick = 0) {
 function tone(bus, { freq = 440, type = 'sine', dur = 0.12, gain = 0.2, slide = 0, delay = 0 }) {
   if (!ensureCtx() || masterMuted) return;
   const t0 = ctx.currentTime + delay;
-  const osc = ctx.createOscillator();
+  const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), bus) : ctx.createOscillator());
   const g = ctx.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(freq, t0);
@@ -161,7 +161,7 @@ function noiseBurst(bus, { dur = 0.08, gain = 0.12, freq = 2000, delay = 0 }) {
   const buf = ctx.createBuffer(1, len, ctx.sampleRate);
   const data = buf.getChannelData(0);
   for (let i = 0; i < len; i++) data[i] = (rng.next() * 2 - 1) * (1 - i / len);
-  const src = ctx.createBufferSource();
+  const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), bus) : ctx.createBufferSource());
   src.buffer = buf;
   const filter = ctx.createBiquadFilter();
   filter.type = 'bandpass';
@@ -264,7 +264,7 @@ function startAmbience() {
   filter.type = 'lowpass';
   filter.frequency.value = 500;
   const oscs = [110, 165, 220].map(f => {
-    const o = ctx.createOscillator();
+    const o = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
     o.type = 'sine';
     o.frequency.value = f;
     o.connect(filter);
@@ -272,7 +272,7 @@ function startAmbience() {
     return o;
   });
   filter.connect(g).connect(buses.ambience);
-  const lfo = ctx.createOscillator();
+  const lfo = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
   lfo.frequency.value = 0.07;
   const lfoGain = ctx.createGain();
   lfoGain.gain.value = 120;

@@ -989,12 +989,12 @@ export class Renderer {
 
   _draw() {
     if (this.composer) {
-      try { this.composer.render(); return; } catch (e) {
+      try { (globalThis.GameOptions ? globalThis.GameOptions.draw(this.composer.renderer, () => this.composer.render()) : this.composer.render()); return; } catch (e) {
         this.postFailed = true;
         this._disposeComposer();
       }
     }
-    this.renderer.render(this.scene, this.camera);
+    (globalThis.GameOptions ? globalThis.GameOptions.draw(this.renderer, () => this.renderer.render(this.scene, this.camera)) : this.renderer.render(this.scene, this.camera));
   }
 
   render(dt) {
