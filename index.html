@@ -93,14 +93,22 @@ body.reduced-motion #title-screen::after{animation:none}
 .overlay .panel h2{margin-top:0}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:.25rem .9rem;font-size:.95rem}
 .kv dt{color:var(--dim)} .kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
-.settings-grid{display:grid;gap:.8rem}
+.settings-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:.8rem}
+#gfx-own{display:contents}
 .settings-grid label{display:flex;justify-content:space-between;align-items:center;gap:1rem}
 .settings-grid input[type=range]{flex:1;max-width:200px}
 .settings-grid select{background:#2a3464;color:var(--ink);border:1px solid #3d4a8a;border-radius:8px;padding:.35rem}
 .settings-tabs{display:flex;gap:.4rem;margin:.2rem 0 .9rem;border-bottom:1px solid #2c3766;padding-bottom:.6rem}
 .settings-tabs button{flex:1;background:transparent}
 .settings-tabs button[aria-selected=true]{background:#2a3464;border-color:var(--accent);color:var(--ink);font-weight:700}
-.settings-grid select{max-width:58%;min-height:36px}
+.settings-grid select{max-width:58%;min-width:0;min-height:36px}
+#settings-body label>span,#gfx-own label>span{min-width:0;overflow-wrap:break-word}
+/* Shared Sound / Language / Report sections (game-options.js) in the Graphics
+   tab: on phones give long (e.g. German) labels room; report fields stack. */
+@media (max-width:480px){
+  #settings-graphics .game-options-row{grid-template-columns:minmax(0,1fr) minmax(72px,34%) auto}
+  #settings-graphics .game-options-report .game-options-row{grid-template-columns:minmax(0,1fr);gap:4px}
+}
 .gfx-scale{display:flex;align-items:center;gap:.5rem;flex:1;justify-content:flex-end;max-width:240px;min-width:0}
 .gfx-scale input{flex:1;min-width:0}
 .gfx-scale output{min-width:3.2em;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -170,23 +178,24 @@ body.large-text{font-size:120%}
 <script src="browser-guard.js"></script>
 <script src="starhermit-sdk.js"></script>
 <script>StarHermit.init();</script>
+<script src="sh-language.js"></script>
 </head>
 <body>
-<a class="skip-link" href="#playfield">Skip to game</a>
+<a class="skip-link" href="#playfield" data-i18n="Skip to game">Skip to game</a>
 <div id="app">
 
   <!-- Title / home -->
   <section id="title-screen" class="screen" aria-labelledby="title-heading">
     <h1 id="title-heading" class="brand">Prism Parcel</h1>
-    <p class="tagline">A luminous tabletop of frosted blocks. Fill rows and columns to clear them together.</p>
-    <nav class="menu" aria-label="Main menu">
-      <button id="btn-play" class="primary">Play</button>
-      <button id="btn-daily">Daily Challenge</button>
-      <button id="btn-journey">Journey</button>
-      <button id="btn-practice">Practice</button>
-      <button id="btn-learn">Learn to Play</button>
-      <button id="btn-help">Help &amp; Rules</button>
-      <button id="btn-settings">Settings</button>
+    <p class="tagline" data-i18n="A luminous tabletop of frosted blocks. Fill rows and columns to clear them together.">A luminous tabletop of frosted blocks. Fill rows and columns to clear them together.</p>
+    <nav class="menu" aria-label="Main menu" data-i18n-aria="Main menu">
+      <button id="btn-play" class="primary" data-i18n="Play">Play</button>
+      <button id="btn-daily" data-i18n="Daily Challenge">Daily Challenge</button>
+      <button id="btn-journey" data-i18n="Journey">Journey</button>
+      <button id="btn-practice" data-i18n="Practice">Practice</button>
+      <button id="btn-learn" data-i18n="Learn to Play">Learn to Play</button>
+      <button id="btn-help" data-i18n="Help &amp; Rules">Help &amp; Rules</button>
+      <button id="btn-settings" data-i18n="Settings">Settings</button>
       <button id="btn-invite" hidden>Invite a friend</button>
       <button id="btn-signin" hidden>Sign in with StarHermit</button>
     </nav>
@@ -202,32 +211,32 @@ body.large-text{font-size:120%}
       <h2 id="setup-heading">Mode</h2>
       <div id="setup-body"></div>
       <div class="row" style="margin-top:1rem">
-        <button id="setup-start" class="primary">Start</button>
-        <button id="setup-back" class="ghost">Back</button>
+        <button id="setup-start" class="primary" data-i18n="Start">Start</button>
+        <button id="setup-back" class="ghost" data-i18n="Back">Back</button>
       </div>
     </div>
   </section>
 
   <!-- Game -->
-  <section id="game-screen" class="screen" hidden aria-label="Game board" tabindex="-1">
-    <aside id="rail-left" aria-label="Objective and progress"></aside>
+  <section id="game-screen" class="screen" hidden aria-label="Game board" tabindex="-1" data-i18n-aria="Game board">
+    <aside id="rail-left" aria-label="Objective and progress" data-i18n-aria="Objective and progress"></aside>
     <main id="playfield">
       <canvas id="gl" aria-hidden="true"></canvas>
-      <div id="hud-top" role="status" aria-label="Score and state">
+      <div id="hud-top" role="status" aria-label="Score and state" data-i18n-aria="Score and state">
         <span class="score" id="hud-score">0</span>
         <span id="hud-objective"></span>
         <span id="hud-combo"></span>
       </div>
       <div id="hud-actions">
-        <button id="btn-drawer" aria-label="Open info panel">☰</button>
-        <button id="btn-hint" title="Hint (H)">Hint</button>
-        <button id="btn-undo" title="Undo (U)">Undo</button>
-        <button id="btn-pause" title="Pause (Esc)">Pause</button>
+        <button id="btn-drawer" aria-label="Open info panel" data-i18n-aria="Open info panel">☰</button>
+        <button id="btn-hint" title="Hint (H)" data-i18n-title="Hint (H)" data-i18n="Hint">Hint</button>
+        <button id="btn-undo" title="Undo (U)" data-i18n-title="Undo (U)" data-i18n="Undo">Undo</button>
+        <button id="btn-pause" title="Pause (Esc)" data-i18n-title="Pause (Esc)" data-i18n="Pause">Pause</button>
       </div>
-      <div id="offer-tray" role="group" aria-label="Offered pieces"></div>
-      <div id="board-mirror" class="visually-hidden" role="grid" aria-label="Board cells"></div>
+      <div id="offer-tray" role="group" aria-label="Offered pieces" data-i18n-aria="Offered pieces"></div>
+      <div id="board-mirror" class="visually-hidden" role="grid" aria-label="Board cells" data-i18n-aria="Board cells"></div>
     </main>
-    <aside id="rail-right" aria-label="Status and actions"></aside>
+    <aside id="rail-right" aria-label="Status and actions" data-i18n-aria="Status and actions"></aside>
   </section>
 
   <!-- Results -->
@@ -240,9 +249,9 @@ body.large-text{font-size:120%}
       <div id="results-compare" class="small"></div>
       <p id="results-lb" class="small" aria-live="polite" hidden></p>
       <div class="row" style="margin-top:1rem">
-        <button id="btn-retry" class="primary">Retry</button>
-        <button id="btn-next">Next</button>
-        <button id="btn-results-home" class="ghost">Home</button>
+        <button id="btn-retry" class="primary" data-i18n="Retry">Retry</button>
+        <button id="btn-next" data-i18n="Next">Next</button>
+        <button id="btn-results-home" class="ghost" data-i18n="Home">Home</button>
       </div>
     </div>
   </section>
@@ -251,12 +260,12 @@ body.large-text{font-size:120%}
 <!-- Pause overlay -->
 <div id="pause-overlay" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="pause-heading">
   <div class="panel">
-    <h2 id="pause-heading">Paused</h2>
+    <h2 id="pause-heading" data-i18n="Paused">Paused</h2>
     <div class="menu">
-      <button id="btn-resume" class="primary">Resume</button>
-      <button id="btn-pause-settings">Settings</button>
-      <button id="btn-pause-help">Help</button>
-      <button id="btn-quit" class="ghost">Leave Round</button>
+      <button id="btn-resume" class="primary" data-i18n="Resume">Resume</button>
+      <button id="btn-pause-settings" data-i18n="Settings">Settings</button>
+      <button id="btn-pause-help" data-i18n="Help">Help</button>
+      <button id="btn-quit" class="ghost" data-i18n="Leave Round">Leave Round</button>
     </div>
   </div>
 </div>
@@ -264,15 +273,15 @@ body.large-text{font-size:120%}
 <!-- Settings overlay -->
 <div id="settings-overlay" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="settings-heading">
   <div class="panel">
-    <h2 id="settings-heading">Settings</h2>
-    <div class="settings-tabs" id="settings-tabs" role="tablist" aria-label="Settings sections">
+    <h2 id="settings-heading" data-i18n="Settings">Settings</h2>
+    <div class="settings-tabs" id="settings-tabs" role="tablist" aria-label="Settings sections" data-i18n-aria="Settings sections">
       <button id="settings-tab-general" role="tab" aria-selected="true" aria-controls="settings-body" data-settings-tab="general">General</button>
       <button id="settings-tab-graphics" role="tab" aria-selected="false" aria-controls="settings-graphics" data-settings-tab="graphics" tabindex="-1">Graphics</button>
     </div>
     <div class="settings-grid" id="settings-body" role="tabpanel" aria-labelledby="settings-tab-general"></div>
-    <div class="settings-grid" id="settings-graphics" role="tabpanel" aria-labelledby="settings-tab-graphics" hidden></div>
+    <div class="settings-grid" id="settings-graphics" role="tabpanel" aria-labelledby="settings-tab-graphics" data-options-graphics hidden><div id="gfx-own"></div></div>
     <div class="row" style="margin-top:1rem">
-      <button id="btn-settings-close" class="primary">Done</button>
+      <button id="btn-settings-close" class="primary" data-i18n="Done">Done</button>
     </div>
   </div>
 </div>
@@ -280,10 +289,10 @@ body.large-text{font-size:120%}
 <!-- Help overlay -->
 <div id="help-overlay" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="help-heading">
   <div class="panel">
-    <h2 id="help-heading">How to Play</h2>
+    <h2 id="help-heading" data-i18n="How to Play">How to Play</h2>
     <div id="help-body"></div>
     <div class="row" style="margin-top:1rem">
-      <button id="btn-help-close" class="primary">Close</button>
+      <button id="btn-help-close" class="primary" data-i18n="Close">Close</button>
     </div>
   </div>
 </div>

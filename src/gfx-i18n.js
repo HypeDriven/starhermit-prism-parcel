@@ -2,7 +2,8 @@
 
 /**
  * Prism Parcel — strings for the Graphics settings panel in every supported
- * locale. The locale comes from navigator.language (exact tag, then language).
+ * locale. main.js asks for the game language (i18n.js getLocale()); a tag
+ * resolves exact first, then by language.
  */
 
 const en = {

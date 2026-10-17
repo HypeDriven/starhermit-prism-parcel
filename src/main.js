@@ -19,8 +19,9 @@ import { Renderer } from './render.js';
 import { PRESETS, CATEGORIES, presetTier, resolve as resolveGfx, choosePreset } from './gfx.js';
 import { gfxStrings } from './gfx-i18n.js';
 import * as audio from './audio.js';
-import { platform } from './platform.js';
+import { platform, mergeProgress } from './platform.js';
 import { currentPlatformStrings } from './platform-i18n.js';
+import { t, getLocale, onLocaleChange, applyStatic } from './i18n.js';
 
 const $ = id => document.getElementById(id);
 
@@ -83,10 +84,15 @@ function buildSaveDoc() {
   };
 }
 
-/** Apply a remote save doc over the local cache (remote wins on conflict). */
-function applySaveDoc(doc) {
+/**
+ * Adopt a remote save doc: progress is merged with this device's
+ * (mergeProgress); settings come from the remote doc unless keepLocalSettings
+ * (a save conflict keeps what this device just chose). Returns true when the
+ * merged result differs from the remote doc (so it should be saved back).
+ */
+function applySaveDoc(doc, { keepLocalSettings = false } = {}) {
   if (!doc || typeof doc !== 'object') return false;
-  if (doc.settings && typeof doc.settings === 'object') {
+  if (!keepLocalSettings && doc.settings && typeof doc.settings === 'object') {
     for (const k of Object.keys(DEFAULT_SETTINGS)) {
       if (doc.settings[k] !== undefined) settings[k] = doc.settings[k];
     }
@@ -96,16 +102,15 @@ function applySaveDoc(doc) {
     }
     migrateGraphics(settings);
   }
-  if (doc.progress && typeof doc.progress === 'object') {
-    for (const k of Object.keys(progress)) {
-      if (doc.progress[k] !== undefined) progress[k] = doc.progress[k];
-    }
-  }
+  const merged = mergeProgress(doc.progress, progress);
+  const differs = JSON.stringify(merged) !== JSON.stringify(mergeProgress(doc.progress, doc.progress))
+    || (keepLocalSettings && JSON.stringify(doc.settings) !== JSON.stringify(settings));
+  Object.assign(progress, merged);
   saveJSON(SETTINGS_KEY, settings);
   saveJSON(PROGRESS_KEY, progress);
   applySettings();
   updateTitleProgress();
-  return true;
+  return differs;
 }
 
 /** Mirror the local cache to the platform cloud-save slot, debounced ~2 s. */
@@ -180,7 +185,7 @@ function announce(msg, assertive = false) {
 function caption(soundEvent) {
   if (!settings.captions) return;
   const text = audio.describeEvent(soundEvent);
-  if (text) announce(text);
+  if (text) announce(t(text));
 }
 
 /* ================================================================== */
@@ -226,7 +231,8 @@ function buildSettings() {
   const row = (label, control) => {
     const l = document.createElement('label');
     const span = document.createElement('span');
-    span.textContent = label;
+    span.dataset.i18n = label;
+    span.textContent = t(label);
     l.append(span, control);
     body.append(l);
     return control;
@@ -247,7 +253,7 @@ function buildSettings() {
     const s = document.createElement('select');
     for (const v of options) {
       const o = document.createElement('option');
-      o.value = v; o.textContent = labels ? labels[v] : v;
+      o.value = v; o.textContent = labels ? t(labels[v]) : v;
       s.append(o);
     }
     s.value = settings[key];
@@ -270,7 +276,8 @@ function buildSettings() {
   row('Haptics', toggle('haptics'));
 
   const replayTut = document.createElement('button');
-  replayTut.textContent = 'Replay tutorial';
+  replayTut.dataset.i18n = 'Replay tutorial';
+  replayTut.textContent = t('Replay tutorial');
   replayTut.addEventListener('click', () => { closeOverlay('settings-overlay'); startLearn(); });
   row('Tutorial', replayTut);
   buildGraphicsSettings();
@@ -278,7 +285,8 @@ function buildSettings() {
 
 /* ---- Graphics tab ---------------------------------------------------- */
 
-const GS = gfxStrings(typeof navigator !== 'undefined' ? navigator.language : 'en-US');
+// Graphics panel strings in the game language (refreshed on a language change).
+let GS = gfxStrings(getLocale());
 let gfxInfoTimer = 0;
 
 function setSettingsTab(tab) {
@@ -328,8 +336,11 @@ function updateGraphicsInfo() {
   $('gfx-post-note').hidden = !info.postFailed;
 }
 
+// Rebuilds only the game's own rows (#gfx-own) — the shared Sound, Language
+// and Report sections (game-options.js) mount after it in #settings-graphics
+// (data-options-graphics) and stay in place.
 function buildGraphicsSettings() {
-  const body = $('settings-graphics');
+  const body = $('gfx-own');
   body.innerHTML = '';
   const g = settings.graphics;
   const detected = renderer ? renderer.detected : 'balanced';
@@ -506,7 +517,7 @@ function startRound(mode, options, meta = {}) {
   buildBoardMirror();
   updateHUD();
   showScreen('game-screen');
-  announce(objectiveText() + ' Round started.');
+  announce(objectiveText() + ' ' + t('Round started.'));
 
   if (mode === 'learn') {
     appState = 'tutorial';
@@ -516,13 +527,18 @@ function startRound(mode, options, meta = {}) {
 
 function objectiveText() {
   const g = session.state && session.state.goal;
-  if (session.mode === 'daily') return 'Daily: highest score';
-  if (session.mode === 'practice') return 'Practice: play freely';
-  if (session.mode === 'learn') return 'Learn: follow the lessons';
-  if (!g) return 'Score as high as you can';
-  const what = g.type === 'score' ? `${g.target} points` : g.type === 'lines' ? `${g.target} lines` : `${g.target} placements`;
-  const limit = session.state.moveLimit ? ` in ${session.state.moveLimit} moves` : '';
-  return `Goal: ${what}${limit}`;
+  if (session.mode === 'daily') return t('Daily: highest score');
+  if (session.mode === 'practice') return t('Practice: play freely');
+  if (session.mode === 'learn') return t('Learn: follow the lessons');
+  if (!g) return t('Score as high as you can');
+  return goalText(g, session.state.moveLimit);
+}
+
+/** "Goal: 300 points in 20 moves" in the game language. */
+function goalText(g, moveLimit) {
+  const what = g.type === 'score' ? t('{n} points', { n: g.target })
+    : g.type === 'lines' ? t('{n} lines', { n: g.target }) : t('{n} placements', { n: g.target });
+  return moveLimit ? t('Goal: {what} in {n} moves', { what, n: moveLimit }) : t('Goal: {what}', { what });
 }
 
 function endRound() {
@@ -567,16 +583,25 @@ function endRound() {
 // board and show the player's rank on the results screen.
 function postToLeaderboard(s) {
   const line = $('results-lb');
-  if (!platform.hosted || (session.mode !== 'journey' && session.mode !== 'daily')) { line.hidden = true; return; }
-  const t = currentPlatformStrings();
+  if (!platform.hosted || (session.mode !== 'journey' && session.mode !== 'daily')) { line.hidden = true; lbLine = null; return; }
+  // The line keeps its state (not its text) so a language change re-renders it
+  // without posting again.
+  lbLine = { key: 'lbPosting' };
   line.hidden = false;
-  line.textContent = t.lbPosting;
+  renderLbLine();
   platform.submitScore(s.score.total).then((r) => {
     if (session.state !== s) return;
-    line.textContent = !r.posted ? t.lbNotPosted
-      : r.rank ? t.lbRank.replace('{rank}', r.rank) : t.lbPosted;
+    lbLine = !r.posted ? { key: 'lbNotPosted' } : r.rank ? { key: 'lbRank', rank: r.rank } : { key: 'lbPosted' };
+    renderLbLine();
     if (session.mode === 'daily') refreshDailyBoard();
   });
+}
+
+let lbLine = null;
+function renderLbLine() {
+  if (!lbLine) return;
+  const p = currentPlatformStrings();
+  $('results-lb').textContent = String(p[lbLine.key]).replace('{rank}', lbLine.rank);
 }
 
 function checkAchievements(s) {
@@ -585,7 +610,7 @@ function checkAchievements(s) {
     progress.achievements[key] = Date.now();
     audio.playAchievement();
     caption('achievement');
-    announce(`Achievement unlocked: ${ACHIEVEMENTS.find(a => a.key === key).name}`, true);
+    announce(t('Achievement unlocked: {name}', { name: t(ACHIEVEMENTS.find(a => a.key === key).name) }), true);
   };
   if (s.over) unlock('first_completion');
   if (session.maxLines >= 3) unlock('mechanic_mastery');
@@ -600,11 +625,15 @@ function checkAchievements(s) {
 function submitDailyScore() {
   // The day's best lives in progress (mirrored by the cloud save when signed
   // in); the round itself is posted by postToLeaderboard.
+  renderDailyCompare();
+  if (platform.hosted) refreshDailyBoard();
+}
+
+function renderDailyCompare() {
   const best = progress.dailyBest[session.dailyDate] || '—';
   $('results-compare').textContent = platform.hosted
-    ? `Daily complete — best today: ${best} (saved to your account).`
-    : `Daily complete — best today: ${best} (saved on this device).`;
-  if (platform.hosted) refreshDailyBoard();
+    ? t('Daily complete — best today: {best} (saved to your account).', { best })
+    : t('Daily complete — best today: {best} (saved on this device).', { best });
 }
 
 function elapsedTime() {
@@ -631,7 +660,7 @@ function issueCommand(cmd) {
       session.commands.push({ slot: cmd.slot, row: cmd.row, col: cmd.col, inv: 1 });
     }
     audio.playInvalid(); caption('invalid');
-    announce('Invalid action: ' + invalidReasonText(check.reason), true);
+    announce(t('Invalid action: {reason}', { reason: invalidReasonText(check.reason) }), true);
     updateHUD();
     return false;
   }
@@ -655,8 +684,8 @@ function issueCommand(cmd) {
       audio.playClear(gain.lines, gain.comboStreak); caption('clear');
       renderer.shake(Math.min(0.05 + gain.lines * 0.04, 0.25));
       haptic([20, 40, 20]);
-      announce(`Cleared ${gain.lines} line${gain.lines > 1 ? 's' : ''} for ${gain.total} points.` +
-        (gain.comboStreak >= 2 ? ` Combo x${gain.comboStreak}.` : ''));
+      announce(t(gain.lines > 1 ? 'Cleared {n} lines for {points} points.' : 'Cleared {n} line for {points} points.', { n: gain.lines, points: gain.total }) +
+        (gain.comboStreak >= 2 ? ' ' + t('Combo x{n}.', { n: gain.comboStreak }) : ''));
     }
     if (!prevOfferEmpty && before.offer.filter(o => o === null).length === OFFER_COUNT - 1 &&
         session.state.offer.every(o => o !== null)) {
@@ -705,12 +734,12 @@ function findClearedLines(before, after) {
 
 function invalidReasonText(reason) {
   switch (reason) {
-    case 'round-over': return 'the round is over';
-    case 'bad-offer-slot': return 'no such offer slot';
-    case 'offer-slot-empty': return 'that piece was already placed';
-    case 'out-of-bounds': return 'the piece would leave the board';
-    case 'cell-occupied': return 'those cells are occupied';
-    case 'piece-does-not-fit': return 'the piece does not fit there';
+    case 'round-over': return t('the round is over');
+    case 'bad-offer-slot': return t('no such offer slot');
+    case 'offer-slot-empty': return t('that piece was already placed');
+    case 'out-of-bounds': return t('the piece would leave the board');
+    case 'cell-occupied': return t('those cells are occupied');
+    case 'piece-does-not-fit': return t('the piece does not fit there');
     default: return reason;
   }
 }
@@ -758,7 +787,7 @@ function tryResumeSnapshot() {
     buildRails(); buildOfferTray(); buildBoardMirror(); updateHUD();
     showScreen('game-screen');
     if (appState === 'tutorial') showTutorialStep(session.tutorialStep);
-    announce('Round restored from your last safe snapshot.');
+    announce(t('Round restored from your last safe snapshot.'));
     return true;
   } catch (e) { return false; }
 }
@@ -772,7 +801,7 @@ function updateHUD() {
   if (!s) return;
   $('hud-score').textContent = String(s.score.total);
   $('hud-objective').textContent = objectiveText();
-  $('hud-combo').textContent = s.comboStreak >= 2 ? `Combo x${s.comboStreak}` : '';
+  $('hud-combo').textContent = s.comboStreak >= 2 ? t('Combo x{n}', { n: s.comboStreak }) : '';
   $('btn-undo').disabled = !(s.undo && (session.mode === 'practice' || session.mode === 'learn'));
   $('btn-hint').disabled = s.over;
   const goalStat = $('stat-goal');
@@ -794,16 +823,16 @@ function buildRails() {
   left.innerHTML = '';
   const obj = document.createElement('div');
   obj.className = 'card';
-  obj.innerHTML = `<h3>Objective</h3><p id="rail-objective">${objectiveText()}</p>`;
+  obj.innerHTML = `<h3>${t('Objective')}</h3><p id="rail-objective">${esc(objectiveText())}</p>`;
   left.append(obj);
 
   const prog = document.createElement('div');
   prog.className = 'card';
-  prog.innerHTML = '<h3>Progress</h3>';
+  prog.innerHTML = `<h3>${t('Progress')}</h3>`;
   const addStat = (label, id, val) => {
     const d = document.createElement('div');
     d.className = 'stat';
-    d.innerHTML = `<span>${label}</span><b id="${id}">${val}</b>`;
+    d.innerHTML = `<span>${t(label)}</span><b id="${id}">${val}</b>`;
     prog.append(d);
   };
   if (s.goal) addStat('Goal', 'stat-goal', `0 / ${s.goal.target}`);
@@ -815,25 +844,24 @@ function buildRails() {
   right.innerHTML = '';
   const status = document.createElement('div');
   status.className = 'card';
-  const modeNames = { learn: 'Learn', journey: `Journey ${session.stageId || ''}`, daily: 'Daily Challenge', practice: 'Practice', challenge: 'Challenge' };
-  status.innerHTML = `<h3>${modeNames[session.mode] || 'Round'}</h3>
-    <div class="stat"><span>Turn</span><b id="stat-turn">0</b></div>
-    <div class="stat"><span>Seed</span><b>${session.options.seed.toString(16)}</b></div>`;
+  const modeNames = { learn: t('Learn'), journey: t('Journey {n}', { n: session.stageId || '' }).trim(), daily: t('Daily Challenge'), practice: t('Practice'), challenge: t('Challenge') };
+  status.innerHTML = `<h3>${modeNames[session.mode] || t('Round')}</h3>
+    <div class="stat"><span>${t('Turn')}</span><b id="stat-turn">0</b></div>
+    <div class="stat"><span>${t('Seed')}</span><b>${session.options.seed.toString(16)}</b></div>`;
   right.append(status);
 
   if (session.mode === 'daily') {
     const board = document.createElement('div');
     board.className = 'card';
-    board.innerHTML = '<h3>Daily Board</h3><div class="friends-list" id="daily-board">Loading…</div>';
+    board.innerHTML = `<h3>${t('Daily Board')}</h3><div class="friends-list" id="daily-board">${t('Loading…')}</div>`;
     right.append(board);
     refreshDailyBoard();
   }
 
   const acts = document.createElement('div');
   acts.className = 'card';
-  acts.innerHTML = `<h3>Controls</h3>
-    <p class="small">Tap a piece, tap a cell — or drag. Keys: 1–3 select, arrows move, Enter place,
-    H hint, U undo, Esc pause.</p>`;
+  acts.innerHTML = `<h3>${t('Controls')}</h3>
+    <p class="small">${t('Tap a piece, tap a cell — or drag. Keys: 1–3 select, arrows move, Enter place, H hint, U undo, Esc pause.')}</p>`;
   right.append(acts);
 }
 
@@ -845,19 +873,19 @@ async function refreshDailyBoard() {
   if (res.ok && res.localOnly) {
     const best = progress.dailyBest[session.dailyDate] || '—';
     el.textContent = platform.hosted
-      ? `Platform board unavailable — your best today: ${best}.`
-      : `Your best today: ${best} (local).`;
+      ? t('Platform board unavailable — your best today: {best}.', { best })
+      : t('Your best today: {best} (local).', { best });
     return;
   }
   if (!res.ok || !res.entries.length) {
-    el.textContent = res.ok ? 'No scores yet today — be the first!' : 'Board unavailable offline.';
+    el.textContent = res.ok ? t('No scores yet today — be the first!') : t('Board unavailable offline.');
     return;
   }
   el.innerHTML = '';
   res.entries.slice(0, 8).forEach((e, i) => {
     const d = document.createElement('div');
     d.className = 'stat';
-    d.innerHTML = `<span>#${i + 1} ${e.name || 'Player'}</span><b>${e.score}</b>`;
+    d.innerHTML = `<span>#${i + 1} ${esc(e.name || t('Player'))}</span><b>${e.score}</b>`;
     el.append(d);
   });
 }
@@ -888,12 +916,12 @@ function buildOfferTray() {
       }
       const label = document.createElement('span');
       label.className = 'offer-name';
-      label.textContent = piece.name;
+      label.textContent = t(piece.name);
       b.append(thumb, label);
     } else {
-      b.textContent = 'Placed';
+      b.textContent = t('Placed');
     }
-    b.setAttribute('aria-label', slot ? `Select ${pieceById(slot.piece).name}, slot ${i + 1}` : `Slot ${i + 1} empty`);
+    b.setAttribute('aria-label', slot ? t('Select {piece}, slot {n}', { piece: t(pieceById(slot.piece).name), n: i + 1 }) : t('Slot {n} empty', { n: i + 1 }));
     b.disabled = !slot;
     b.addEventListener('click', () => selectSlot(i));
     tray.append(b);
@@ -913,7 +941,7 @@ function buildBoardMirror() {
       cell.setAttribute('role', 'gridcell');
       cell.tabIndex = -1;
       cell.className = 'visually-hidden';
-      cell.textContent = s.board[r][c] ? `Row ${r + 1} column ${c + 1}, occupied` : `Row ${r + 1} column ${c + 1}, empty`;
+      cell.textContent = t(s.board[r][c] ? 'Row {r} column {c}, occupied' : 'Row {r} column {c}, empty', { r: r + 1, c: c + 1 });
       cell.addEventListener('click', () => { session.cursor = { row: r, col: c }; commitAt(r, c); });
       row.append(cell);
     }
@@ -928,7 +956,7 @@ function selectSlot(i) {
   audio.playSelect();
   buildOfferTray();
   if (session.selectedSlot != null) {
-    announce(`${pieceById(session.state.offer[i].piece).name} selected. Choose a cell.`);
+    announce(t('{piece} selected. Choose a cell.', { piece: t(pieceById(session.state.offer[i].piece).name) }));
     previewAt(session.cursor.row, session.cursor.col);
   } else {
     renderer.hideGhost();
@@ -961,7 +989,7 @@ function showTutorialStep(i) {
   session.tutorialStep = i;
   const step = TUTORIAL_STEPS[i];
   if (!step) { appState = 'active'; return; }
-  announce(`Lesson ${i + 1} of ${TUTORIAL_STEPS.length}: ${step.title}. ${step.text}`, true);
+  announce(t('Lesson {n} of {total}: {title}.', { n: i + 1, total: TUTORIAL_STEPS.length, title: t(step.title) }) + ' ' + t(step.text), true);
   let card = $('tutorial-card');
   if (!card) {
     card = document.createElement('div');
@@ -970,7 +998,7 @@ function showTutorialStep(i) {
     card.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);top:calc(3.5rem + var(--sat));z-index:10;max-width:min(420px,calc(90vw / var(--ui-scale,1)));background:rgba(20,26,51,.92)';
     $('playfield').append(card);
   }
-  card.innerHTML = `<h3>${i + 1}/${TUTORIAL_STEPS.length} — ${step.title}</h3><p>${step.text}</p>`;
+  card.innerHTML = `<h3>${i + 1}/${TUTORIAL_STEPS.length} — ${t(step.title)}</h3><p>${t(step.text)}</p>`;
   renderer && renderer.resize(); // the camera frames the board below a centred lesson card
 }
 
@@ -979,7 +1007,7 @@ function advanceTutorial(cmd, gain) {
   if (!step) return;
   const ok = step.require === 'place' || (step.require === 'clear' && gain && gain.lines > 0);
   if (!ok) {
-    announce('Almost — this lesson needs you to clear a line. Try filling a full row or column.', true);
+    announce(t('Almost — this lesson needs you to clear a line. Try filling a full row or column.'), true);
     return;
   }
   audio.playCombo();
@@ -992,7 +1020,7 @@ function advanceTutorial(cmd, gain) {
     appState = 'active';
     progress.tutorialDone = true;
     persistProgress();
-    announce('Tutorial complete! Keep playing — the round ends when no piece fits.', true);
+    announce(t('Tutorial complete! Keep playing — the round ends when no piece fits.'), true);
   } else {
     showTutorialStep(next);
   }
@@ -1002,31 +1030,35 @@ function advanceTutorial(cmd, gain) {
 /* Setup screens                                                      */
 /* ================================================================== */
 
-function showSetup(kind) {
+// The open setup screen and its pick, so a language change can redraw it.
+let setupView = null; // { kind, chosen }
+
+function showSetup(kind, keep = null) {
   appState = 'mode-select';
+  setupView = { kind, chosen: keep ? keep.chosen : null };
   const body = $('setup-body');
   const start = $('setup-start');
   body.innerHTML = '';
-  $('setup-heading').textContent = { journey: 'Journey', daily: 'Daily Challenge', practice: 'Practice' }[kind] || 'Setup';
+  $('setup-heading').textContent = t({ journey: 'Journey', daily: 'Daily Challenge', practice: 'Practice' }[kind] || 'Setup');
 
   if (kind === 'journey') {
     const info = document.createElement('p');
     info.className = 'small';
-    info.textContent = '40 authored stages. One new idea at a time, then mastery gates. Ranked: no — progress only.';
+    info.textContent = t('40 authored stages. One new idea at a time, then mastery gates. Ranked: no — progress only.');
     body.append(info);
     const grid = document.createElement('div');
     grid.className = 'stage-grid';
-    let chosen = progress.stage;
+    let chosen = setupView.chosen || progress.stage;
     for (const st of STAGES) {
       const b = document.createElement('button');
       const locked = st.id > progress.stage;
-      b.className = locked ? 'locked' : '';
+      b.className = locked ? 'locked' : (keep && st.id === chosen ? 'primary' : '');
       b.disabled = locked;
       const stars = progress.stars[st.id] || 0;
       b.innerHTML = `<span>${st.id}</span><span class="stars">${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}</span>`;
-      b.title = `${st.difficulty} — ${st.goal.type} ${st.goal.target}${st.moveLimit ? ` in ${st.moveLimit} moves` : ''}${st.mastery ? ' (mastery)' : ''}`;
-      b.setAttribute('aria-label', `Stage ${st.id}, ${st.difficulty}${locked ? ', locked' : ''}`);
-      b.addEventListener('click', () => { chosen = st.id; grid.querySelectorAll('button').forEach(x => x.classList.remove('primary')); b.classList.add('primary'); });
+      b.title = `${t(DIFFICULTY_INFO[st.difficulty].name)} — ${goalText(st.goal, st.moveLimit)}${st.mastery ? ' ' + t('(mastery)') : ''}`;
+      b.setAttribute('aria-label', t(locked ? 'Stage {n}, {difficulty}, locked' : 'Stage {n}, {difficulty}', { n: st.id, difficulty: t(DIFFICULTY_INFO[st.difficulty].name) }));
+      b.addEventListener('click', () => { chosen = st.id; setupView.chosen = st.id; grid.querySelectorAll('button').forEach(x => x.classList.remove('primary')); b.classList.add('primary'); });
       grid.append(b);
     }
     body.append(grid);
@@ -1044,15 +1076,15 @@ function showSetup(kind) {
     const rs = dailyRuleset(date);
     const p = document.createElement('div');
     p.innerHTML = `
-      <p>One shared seed and ruleset per UTC day. Score chase — play until no piece fits.</p>
+      <p>${t('One shared seed and ruleset per UTC day. Score chase — play until no piece fits.')}</p>
       <dl class="kv">
-        <dt>Date (UTC)</dt><dd>${date}</dd>
-        <dt>Seed</dt><dd>${rs.seed.toString(16)}</dd>
-        <dt>Ruleset</dt><dd>v${rs.version}, medium pieces</dd>
-        <dt>Par</dt><dd>${rs.par}</dd>
-        <dt>Ranked</dt><dd>Yes — server-validated replay</dd>
-        <dt>Your best today</dt><dd>${progress.dailyBest[date] || '—'}</dd>
-        <dt>Expected duration</dt><dd>3–6 minutes</dd>
+        <dt>${t('Date (UTC)')}</dt><dd>${date}</dd>
+        <dt>${t('Seed')}</dt><dd>${rs.seed.toString(16)}</dd>
+        <dt>${t('Ruleset')}</dt><dd>${t('v{n}, medium pieces', { n: rs.version })}</dd>
+        <dt>${t('Par')}</dt><dd>${rs.par}</dd>
+        <dt>${t('Ranked')}</dt><dd>${t('Yes — server-validated replay')}</dd>
+        <dt>${t('Your best today')}</dt><dd>${progress.dailyBest[date] || '—'}</dd>
+        <dt>${t('Expected duration')}</dt><dd>${t('3–6 minutes')}</dd>
       </dl>
       <p class="small" id="daily-countdown"></p>`;
     body.append(p);
@@ -1062,7 +1094,7 @@ function showSetup(kind) {
       const now = platform.now();
       const next = new Date(date + 'T00:00:00Z').getTime() + 86400000;
       const s = Math.max(0, Math.floor((next - now) / 1000));
-      el.textContent = `Next daily in ${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m ${s % 60}s`;
+      el.textContent = t('Next daily in {h}h {m}m {s}s', { h: Math.floor(s / 3600), m: Math.floor(s / 60) % 60, s: s % 60 });
       setTimeout(cd, 1000);
     };
     cd();
@@ -1074,17 +1106,17 @@ function showSetup(kind) {
 
   if (kind === 'practice') {
     const p = document.createElement('div');
-    p.innerHTML = '<p>Free play with undo. Restart any time. Ranked: no — never affects rating.</p>';
+    p.innerHTML = `<p>${t('Free play with undo. Restart any time. Ranked: no — never affects rating.')}</p>`;
     body.append(p);
-    let chosen = 'medium';
+    let chosen = setupView.chosen || 'medium';
     const rowEl = document.createElement('div');
     rowEl.className = 'row';
     for (const d of DIFFICULTIES) {
       const b = document.createElement('button');
-      b.textContent = DIFFICULTY_INFO[d].name;
-      b.title = DIFFICULTY_INFO[d].desc;
+      b.textContent = t(DIFFICULTY_INFO[d].name);
+      b.title = t(DIFFICULTY_INFO[d].desc);
       if (d === chosen) b.classList.add('primary');
-      b.addEventListener('click', () => { chosen = d; rowEl.querySelectorAll('button').forEach(x => x.classList.remove('primary')); b.classList.add('primary'); });
+      b.addEventListener('click', () => { chosen = d; setupView.chosen = d; rowEl.querySelectorAll('button').forEach(x => x.classList.remove('primary')); b.classList.add('primary'); });
       rowEl.append(b);
     }
     body.append(rowEl);
@@ -1095,7 +1127,7 @@ function showSetup(kind) {
   }
 
   showScreen('setup-screen');
-  start.focus();
+  if (!keep) start.focus();
 }
 
 function startLearn() {
@@ -1109,19 +1141,32 @@ function startLearn() {
 
 function showResults() {
   const s = session.state;
-  $('results-heading').textContent = s.won ? 'Goal Complete!' : 'Round Over';
+  renderResults();
+  $('btn-next').hidden = !(session.mode === 'journey' && s.won && session.stageId < stageCount());
+  showScreen('results-screen');
+  announce(t('{heading} Total score {n}.', { heading: $('results-heading').textContent, n: s.score.total }), true);
+  $('btn-retry').focus();
+  updateTitleProgress();
+}
+
+// Results text from the finished round (also re-run on a language change;
+// the leaderboard line keeps its state and is never re-posted).
+function renderResults() {
+  const s = session.state;
+  if (!s) return;
+  $('results-heading').textContent = s.won ? t('Goal Complete!') : t('Round Over');
   const reasons = {
-    'goal-complete': 'Objective reached.',
-    'no-fit': 'No offered piece fits on the board.',
-    'move-limit': 'Move limit reached.'
+    'goal-complete': t('Objective reached.'),
+    'no-fit': t('No offered piece fits on the board.'),
+    'move-limit': t('Move limit reached.')
   };
   $('results-sub').textContent = (reasons[s.reason] || '') +
-    (session.mode === 'journey' && session.stageId ? ` Journey stage ${session.stageId}.` : '');
+    (session.mode === 'journey' && session.stageId ? ' ' + t('Journey stage {n}.', { n: session.stageId }) : '');
 
   const dl = $('results-breakdown');
   dl.innerHTML = '';
   const add = (k, v) => {
-    const dt = document.createElement('dt'); dt.textContent = k;
+    const dt = document.createElement('dt'); dt.textContent = t(k);
     const dd = document.createElement('dd'); dd.textContent = String(v);
     dl.append(dt, dd);
   };
@@ -1138,15 +1183,11 @@ function showResults() {
   const ach = $('results-achievements');
   const unlocked = ACHIEVEMENTS.filter(a => progress.achievements[a.key]);
   ach.innerHTML = unlocked.length
-    ? `<p class="small">Achievements: ${unlocked.map(a => a.name).join(', ')}</p>` : '';
+    ? `<p class="small">${esc(t('Achievements: {list}', { list: unlocked.map(a => t(a.name)).join(', ') }))}</p>` : '';
 
   if (session.mode !== 'daily') $('results-compare').textContent = '';
-
-  $('btn-next').hidden = !(session.mode === 'journey' && s.won && session.stageId < stageCount());
-  showScreen('results-screen');
-  announce(`${$('results-heading').textContent} Total score ${s.score.total}.`, true);
-  $('btn-retry').focus();
-  updateTitleProgress();
+  else if (session.dailyDate) renderDailyCompare();
+  renderLbLine();
 }
 
 /* ================================================================== */
@@ -1157,20 +1198,20 @@ function buildHelp() {
   const body = $('help-body');
   const keys = (a) => (bindings[a] || []).map(keyLabel).join('/');
   body.innerHTML = `
-    <h3>The rules</h3>
+    <h3>${t('The rules')}</h3>
     <ul>
-      <li>You receive <b>three pieces</b> at a time. Place all three to receive a new offer.</li>
-      <li>Complete a full <b>row or column</b> of 10 cells to clear it. Rows and columns clear together.</li>
-      <li>Score: placed cells + 10 per cleared cell + simultaneous bonus (2+ lines) + combo streak bonus.</li>
-      <li>The round ends when <b>no offered piece fits</b>.</li>
+      <li>${t('help.offer')}</li>
+      <li>${t('help.clear')}</li>
+      <li>${t('help.score')}</li>
+      <li>${t('help.end')}</li>
     </ul>
-    <h3>Controls</h3>
+    <h3>${t('Controls')}</h3>
     <ul>
-      <li><b>Pointer/touch:</b> tap a piece in the tray, then tap a board cell — or drag from the tray onto the board.</li>
-      <li><b>Keyboard:</b> ${keys('slot_1')}–${keys('slot_3')} select a piece · ${keys('cursor_up')} ${keys('cursor_left')} ${keys('cursor_down')} ${keys('cursor_right')} move the cursor · ${keys('place')} place · ${keys('hint')} hint · ${keys('undo')} undo (practice) · ${keys('clear')} clear selection · ${keys('pause')} pause.</li>
-      <li><b>Gamepad:</b> D-pad/stick moves the cursor, A places, B cancels, Start pauses.</li>
+      <li>${t('help.pointer')}</li>
+      <li>${t('help.keyboard', { slots: `${keys('slot_1')}–${keys('slot_3')}`, move: `${keys('cursor_up')} ${keys('cursor_left')} ${keys('cursor_down')} ${keys('cursor_right')}`, place: keys('place'), hint: keys('hint'), undo: keys('undo'), clear: keys('clear'), pause: keys('pause') })}</li>
+      <li>${t('help.gamepad')}</li>
     </ul>
-    <h3>Pieces</h3>
+    <h3>${t('Pieces')}</h3>
     <div id="help-pieces" class="row" style="justify-content:flex-start"></div>`;
   const wrap = body.querySelector('#help-pieces');
   const seen = new Set();
@@ -1180,7 +1221,7 @@ function buildHelp() {
     const chip = document.createElement('span');
     chip.className = 'card';
     chip.style.padding = '.3rem .6rem';
-    chip.textContent = `${p.name} (${p.cells.length})`;
+    chip.textContent = `${t(p.name)} (${p.cells.length})`;
     wrap.append(chip);
   }
 }
@@ -1193,7 +1234,7 @@ function updateTitleProgress() {
   const stars = Object.values(progress.stars).reduce((a, b) => a + b, 0);
   const tier = [...MASTERY_TIERS].reverse().find(t => stars >= t.stars) || MASTERY_TIERS[0];
   $('title-progress').textContent =
-    `Journey stage ${progress.stage}/${stageCount()} · ${stars} ★ · Rank: ${tier.name}`;
+    t('Journey stage {n}/{total} · {stars} ★ · Rank: {rank}', { n: progress.stage, total: stageCount(), stars, rank: t(tier.name) });
 }
 
 /** Name + cloud-sync status slot (hosted), or the honest local label. */
@@ -1204,19 +1245,19 @@ function updateTitleProfile() {
   $('btn-invite').hidden = !platform.inviteLink();
   if (platform.hosted) {
     const syncLabel = {
-      syncing: 'Saving…', synced: 'Cloud save synced',
-      offline: 'Offline — local cache', error: 'Sync failed'
+      syncing: t('Saving…'), synced: t('Cloud save synced'),
+      offline: t('Offline — local cache'), error: t('Sync failed')
     }[platform.syncState] || '';
-    el.textContent = `Playing as ${platform.displayName()} · ${syncLabel}`;
+    el.textContent = t('Playing as {name} · {sync}', { name: platform.displayName(), sync: syncLabel });
   } else {
-    el.textContent = 'Local progress (offline cache)';
+    el.textContent = t('Local progress (offline cache)');
   }
 }
 
 function updateTitleClock() {
   // The device clock drives daily boundaries; identity and sync state live
   // in #title-profile.
-  $('title-clock').textContent = `UTC day ${utcDateStr(platform.now())}`;
+  $('title-clock').textContent = t('UTC day {date}', { date: utcDateStr(platform.now()) });
 }
 
 /* ================================================================== */
@@ -1229,7 +1270,7 @@ function pauseGame() {
   appState = 'paused';
   session.pausedAt = Date.now();
   openOverlay('pause-overlay');
-  announce('Paused.');
+  announce(t('Paused.'));
 }
 
 function resumeGame() {
@@ -1237,7 +1278,7 @@ function resumeGame() {
   session.pausedTotal += Date.now() - session.pausedAt;
   appState = session.mode === 'learn' && session.tutorialStep < TUTORIAL_STEPS.length ? 'tutorial' : 'active';
   closeOverlay('pause-overlay');
-  announce('Resumed.');
+  announce(t('Resumed.'));
 }
 
 /* ================================================================== */
@@ -1415,7 +1456,7 @@ function pollGamepad() {
 
 function doHint() {
   const hint = findHint(session.state);
-  if (!hint) { announce('No legal placement exists.', true); return; }
+  if (!hint) { announce(t('No legal placement exists.'), true); return; }
   session.selectedSlot = hint.slot;
   session.cursor = { row: hint.row, col: hint.col };
   renderer.setSelectedSlot(hint.slot);
@@ -1423,17 +1464,17 @@ function doHint() {
   previewAt(hint.row, hint.col);
   buildOfferTray();
   audio.playSelect();
-  announce(`Hint: place slot ${hint.slot + 1} at row ${hint.row + 1}, column ${hint.col + 1}.`);
+  announce(t('Hint: place slot {slot} at row {row}, column {col}.', { slot: hint.slot + 1, row: hint.row + 1, col: hint.col + 1 }));
 }
 
 function doUndo() {
   if (session.mode !== 'practice' && session.mode !== 'learn') {
-    announce('Undo is only available in practice and learn modes.', true);
+    announce(t('Undo is only available in practice and learn modes.'), true);
     return;
   }
   const s = applyCommand(session.state, { type: 'undo' });
   if (s === session.state || !session.state.undo) {
-    announce('Nothing to undo.', true);
+    announce(t('Nothing to undo.'), true);
     return;
   }
   session.state = s;
@@ -1448,7 +1489,7 @@ function doUndo() {
   renderer.hideGhost();
   buildOfferTray(); buildBoardMirror(); updateHUD();
   audio.playClick();
-  announce('Undone.');
+  announce(t('Undone.'));
 }
 
 /* ================================================================== */
@@ -1476,11 +1517,11 @@ function setupLifecycle() {
   window.addEventListener('beforeunload', () => session.state && !session.state.over && saveSnapshot());
   $('gl').addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
-    announce('Graphics context lost — rebuilding…', true);
+    announce(t('Graphics context lost — rebuilding…'), true);
   });
   $('gl').addEventListener('webglcontextrestored', () => {
     rebuildRenderer();
-    announce('Graphics restored.');
+    announce(t('Graphics restored.'));
   });
 }
 
@@ -1509,6 +1550,7 @@ function wire() {
   click('btn-pause-settings', openSettings);
   $('settings-tab-general').textContent = GS.tabGeneral;
   $('settings-tab-graphics').textContent = GS.tabGraphics;
+  wireLanguage();
   for (const t of ['general', 'graphics']) {
     $('settings-tab-' + t).addEventListener('click', () => { audio.playClick(); setSettingsTab(t); });
   }
@@ -1556,31 +1598,96 @@ function wire() {
 /* StarHermit account buttons                                         */
 /* ================================================================== */
 
+let accountNote = null; // (strings) => text of the last account note
+function renderAccountButtons() {
+  const p = currentPlatformStrings();
+  $('btn-signin').textContent = p.signIn;
+  $('btn-invite').textContent = p.invite;
+  if (accountNote) $('title-account-note').textContent = accountNote(p);
+}
+
 function wirePlatform() {
-  const t = currentPlatformStrings();
-  const note = (msg) => { const el = $('title-account-note'); el.textContent = msg; el.hidden = false; };
-  $('btn-signin').textContent = t.signIn;
-  $('btn-invite').textContent = t.invite;
+  const note = (fn) => { accountNote = fn; const el = $('title-account-note'); el.textContent = fn(currentPlatformStrings()); el.hidden = false; };
+  renderAccountButtons();
   $('btn-signin').addEventListener('click', () => platform.signIn());
   $('btn-invite').addEventListener('click', async () => {
     const link = platform.inviteLink();
     if (!link) return;
     try {
       await navigator.clipboard.writeText(link);
-      note(t.inviteCopied);
+      note((p) => p.inviteCopied);
     } catch (e) {
-      note(t.inviteFailed.replace('{link}', link));
+      note((p) => p.inviteFailed.replace('{link}', link));
     }
   });
   platform.onAuthChange = ({ signedIn }) => {
-    if (!signedIn) note(t.signedOut);
+    if (!signedIn) note((p) => p.signedOut);
     updateTitleProfile();
   };
+  // A cloud write lost to another device: the SDK reloaded the newer doc
+  // (loadJSON); merge it with this device's progress and save on top.
+  platform.onSaveConflict = (doc) => {
+    if (doc) applySaveDoc(doc, { keepLocalSettings: true });
+    scheduleCloudSave();
+  };
+}
+
+/* ================================================================== */
+/* Language                                                           */
+/* ================================================================== */
+
+/**
+ * Settings → Language (shared section, sh-language.js) switches live: static
+ * markup re-applies through data-i18n; everything drawn in code re-renders
+ * here in place — the round, its board and timers are untouched.
+ */
+function wireLanguage() {
+  onLocaleChange(() => {
+    GS = gfxStrings(getLocale());
+    $('settings-tab-general').textContent = GS.tabGeneral;
+    $('settings-tab-graphics').textContent = GS.tabGraphics;
+    applyStatic();
+    renderAccountButtons();
+    updateTitleProgress();
+    updateTitleProfile();
+    updateTitleClock();
+    if (!$('settings-overlay').hidden) {
+      // General rows: re-label in place (controls keep focus and values);
+      // Graphics: rebuild only the game's own box.
+      for (const o of $('settings-body').querySelectorAll('select option')) {
+        const s = o.closest('select');
+        if (s && s.parentElement && s.parentElement.querySelector('[data-i18n="Visual theme"]')) o.textContent = t(themeInfo(o.value).name);
+      }
+      buildGraphicsSettings();
+    }
+    if (!$('help-overlay').hidden) buildHelp();
+    if (currentScreen === 'setup-screen' && setupView) showSetup(setupView.kind, setupView);
+    if (session.state && currentScreen === 'game-screen') {
+      buildRails();
+      buildOfferTray();
+      buildBoardMirror();
+      updateHUD();
+      if (appState === 'tutorial' || (appState === 'paused' && $('tutorial-card'))) {
+        const step = TUTORIAL_STEPS[session.tutorialStep];
+        const card = $('tutorial-card');
+        if (step && card) card.innerHTML = `<h3>${session.tutorialStep + 1}/${TUTORIAL_STEPS.length} — ${t(step.title)}</h3><p>${t(step.text)}</p>`;
+      }
+    }
+    if (currentScreen === 'results-screen') renderResults();
+    if (webglNote) webglNote.textContent = t(WEBGL_NOTE);
+  });
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
 /* ================================================================== */
 /* Boot                                                               */
 /* ================================================================== */
+
+const WEBGL_NOTE = 'This device or browser does not support WebGL. Your settings and progress are preserved; the game needs 3D support to render the board.';
+let webglNote = null;
 
 async function boot() {
   appState = 'boot';
@@ -1593,7 +1700,7 @@ async function boot() {
   if (platform.hosted) {
     platform.loadProfile().then(updateTitleProfile);
     const doc = await platform.loadCloud();
-    if (doc) applySaveDoc(doc);
+    if (doc && applySaveDoc(doc)) scheduleCloudSave(); // merged result differs: save it back
     await applyRemoteSettings();
   }
   platform.loadBindings(DEFAULT_BINDINGS).then((b) => { bindings = b; buildHelp(); });
@@ -1616,8 +1723,8 @@ async function boot() {
   } catch (e) {
     const p = document.createElement('p');
     p.style.color = 'var(--danger)';
-    p.textContent = 'This device or browser does not support WebGL. ' +
-      'Your settings and progress are preserved; the game needs 3D support to render the board.';
+    p.textContent = t(WEBGL_NOTE);
+    webglNote = p;
     $('title-screen').append(p);
   }
   syncGfxAttrs();

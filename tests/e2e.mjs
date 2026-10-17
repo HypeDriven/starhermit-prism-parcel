@@ -21,6 +21,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { launchToken, stubStarHermit } from './starhermit-e2e.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MIME = {
@@ -274,6 +275,100 @@ async function runPass(vpName, viewport, hasTouch, baseURL) {
   }
 }
 
+// Language step (signed in, stubbed StarHermit): Automatic follows the
+// account language (fr-CA); choosing German mid-round from the pause menu's
+// Settings re-renders the HUD, rails, tray and settings in place (same round,
+// same score), saves ui.language, and Report a problem posts to /reports.
+async function runLanguagePass(vpName, viewport, hasTouch, baseURL) {
+  const browser = await chromium.launch({
+    executablePath: '/usr/bin/google-chrome',
+    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+  });
+  const langErrors = [];
+  try {
+    const context = await browser.newContext({ viewport, hasTouch });
+    const page = await context.newPage();
+    page.on('pageerror', (e) => langErrors.push(`pageerror: ${e.message}`));
+    page.on('console', (m) => {
+      if ((m.type() !== 'error' && m.type() !== 'warning') || browserNoise.test(m.text())) return;
+      langErrors.push(`console: ${m.text()}`);
+    });
+    const calls = await stubStarHermit(page, { preferredLanguage: 'fr-CA' });
+    await step(`${vpName}: language — Automatic = account fr-CA, German mid-round, ui.language saved, report posted`, async () => {
+      await page.goto('about:blank');
+      await page.goto(`${baseURL}/index.html#game_token=${launchToken()}`, { waitUntil: 'load' });
+      await page.waitForFunction(() => document.documentElement.lang === 'fr-CA', null, { timeout: 15000 });
+      await page.waitForSelector('#title-screen:not([hidden])');
+      if ((await page.textContent('#btn-practice')).trim() !== 'Entraînement') throw new Error('title not in French');
+      await page.click('#btn-practice');
+      await page.waitForSelector('#setup-screen:not([hidden])');
+      await page.click('#setup-start');
+      await page.waitForSelector('#game-screen:not([hidden])');
+      await placeViaHint(page);
+      await page.waitForFunction(() => Number(document.getElementById('hud-score').textContent) > 0);
+      if ((await page.textContent('#hud-objective')).trim() !== 'Entraînement : jouez librement') throw new Error('HUD not in French: ' + await page.textContent('#hud-objective'));
+      const before = await page.textContent('#hud-score');
+      await page.click('#btn-pause');
+      await page.waitForSelector('#pause-overlay:not([hidden])');
+      await page.click('#btn-pause-settings');
+      await page.waitForSelector('#settings-overlay:not([hidden])');
+      await page.click('#settings-tab-graphics');
+      const choice = page.locator('#settings-graphics [data-game-language="choice"]');
+      await choice.waitFor({ state: 'attached', timeout: 5000 });
+      if ((await page.locator('[data-game-language="choice"]').count()) !== 1) throw new Error('expected exactly one language selector');
+      await choice.scrollIntoViewIfNeeded();
+      const auto = await choice.locator('option').first().textContent();
+      if (auto !== 'Automatique — Français (Canada)') throw new Error('Automatic label not resolved: ' + auto);
+      await choice.selectOption('de-DE');
+      await page.waitForFunction(() => document.documentElement.lang === 'de-DE');
+      await page.waitForFunction(() => /gespeichert/.test(document.querySelector('[data-game-language="status"]').textContent));
+      if (calls.settings['ui.language']?.choice !== 'de-DE') throw new Error('ui.language not saved: ' + JSON.stringify(calls.settings));
+      if ((await page.textContent('#settings-heading')).trim() !== 'Einstellungen') throw new Error('settings title not re-rendered');
+      if ((await page.textContent('#settings-tab-graphics')).trim() !== 'Grafik') throw new Error('settings tab not re-rendered');
+      if ((await page.textContent('label[for="gfx-preset"] span')).trim() !== 'Qualität') throw new Error('graphics rows not re-rendered');
+      if (!(await choice.isVisible())) throw new Error('language selector lost after the switch');
+      const report = page.locator('#settings-graphics [data-game-report="title"]');
+      await report.scrollIntoViewIfNeeded();
+      await report.fill('Test report');
+      await page.click('#settings-graphics [data-game-report="send"]');
+      await page.waitForFunction(() => /Danke/.test(document.querySelector('[data-game-report="status"]').textContent));
+      if (!calls.reports?.[0] || calls.reports[0].kind !== 'bug') throw new Error('report not posted');
+      const panelOver = await page.evaluate(() => [...document.querySelectorAll('#settings-overlay label, #settings-overlay button, #settings-overlay select')]
+        .filter((n) => n.offsetParent && n.getBoundingClientRect().right > window.innerWidth + 1).map((n) => n.textContent.trim().slice(0, 30)));
+      if (panelOver.length) throw new Error('German settings overflow: ' + panelOver.join(' | '));
+      await page.screenshot({ path: shot('language-settings', vpName) });
+      await page.click('#settings-tab-general');
+      if ((await page.textContent('#settings-body label span')).trim() !== 'Musiklautstärke') throw new Error('general tab not re-rendered');
+      await page.click('#btn-settings-close');
+      await page.waitForSelector('#settings-overlay', { state: 'hidden' });
+      if ((await page.textContent('#pause-heading')).trim() !== 'Pausiert') throw new Error('pause panel not in German');
+      await page.click('#btn-resume');
+      await page.waitForSelector('#pause-overlay', { state: 'hidden' });
+      if ((await page.textContent('#hud-objective')).trim() !== 'Übung: frei spielen') throw new Error('HUD not re-rendered: ' + await page.textContent('#hud-objective'));
+      if ((await page.textContent('#hud-score')) !== before) throw new Error('round changed across the switch');
+      if ((await page.textContent('#btn-hint')).trim() !== 'Tipp') throw new Error('HUD buttons not re-rendered');
+      if (!/Ziel/.test(await page.textContent('#rail-left h3'))) throw new Error('rails not re-rendered');
+      const over = await page.evaluate(() => [...document.querySelectorAll('#hud-top *, #hud-actions button, #offer-tray button')]
+        .filter((n) => n.offsetParent && n.getBoundingClientRect().right > window.innerWidth + 1).map((n) => n.textContent.trim().slice(0, 30)));
+      if (over.length) throw new Error('German HUD overflows: ' + over.join(' | '));
+      await page.screenshot({ path: shot('language-play', vpName) });
+      // Back to Automatic (account fr-CA).
+      await page.click('#btn-pause');
+      await page.click('#btn-pause-settings');
+      await page.click('#settings-tab-graphics');
+      await choice.scrollIntoViewIfNeeded();
+      await choice.selectOption('auto');
+      await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+      if ((await page.textContent('#settings-heading')).trim() !== 'Paramètres') throw new Error('settings not back in French');
+      await page.unroute(/\/api\/v1\//);
+    });
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+  if (langErrors.length) throw new Error(`${vpName} language pass had console output:\n  ${langErrors.join('\n  ')}`);
+}
+
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const baseURL = `http://127.0.0.1:${server.address().port}`;
 console.log(`serving ${ROOT} at ${baseURL}`);
@@ -285,7 +380,9 @@ try {
   if (errors.length) throw new Error('page errors:\n' + errors.join('\n'));
   if (ownServerCalls.length) throw new Error('standalone made own-server requests: ' + ownServerCalls.join(', '));
   console.log('ok - standalone load made zero same-origin /api or /ws requests');
-  console.log('\nE2E PASS — full playthrough clean on desktop + mobile, no page errors');
+  await runLanguagePass('desktop', { width: 1280, height: 800 }, false, baseURL);
+  await runLanguagePass('mobile', { width: 390, height: 844 }, true, baseURL);
+  console.log('\nE2E PASS — full playthrough + language step clean on desktop + mobile, no page errors');
 } finally {
   server.close();
 }

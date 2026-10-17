@@ -14,15 +14,29 @@ const TOKEN = `h.${b64u({ sub: 'user-9988ffee', game_scope: 'pp-slug', exp: Math
 function install(href) {
   const calls = [];
   const saves = {};
-  const kv = { theme: 'ember' };
+  const etags = {};
+  let version = 0;
+  const kv = { theme: 'ember', 'ui.language': { choice: 'it-IT' } };
   const fetch = async (url, init = {}) => {
     calls.push({ url, method: init.method || 'GET', init });
     const r = (status, body) => new Response(body, { status });
     const j = (o) => r(200, JSON.stringify(o));
     if (url.endsWith('/profile')) return j({ username: 'hidden', nickname: url.includes('user-9988ffee') ? 'Prismatic' : '' });
     if (url.includes('/cloud-saves/')) {
-      const key = decodeURIComponent(url.split('/cloud-saves/')[1]);
-      if (init.method === 'PUT') { saves[key] = Buffer.from(JSON.parse(init.body).dataBase64, 'base64'); return j({}); }
+      // Versioned slot like the platform: /info carries the ETag, a PUT must
+      // match it (If-Match) or target an empty slot (If-None-Match: *), else 412.
+      const rest = decodeURIComponent(url.split('/cloud-saves/')[1]);
+      const key = rest.replace(/\/info$/, '');
+      if (rest.endsWith('/info')) return j(saves[key] ? { exists: true, etag: etags[key] } : { exists: false });
+      if (init.method === 'PUT') {
+        const hd = init.headers || {};
+        if ((hd['If-Match'] && hd['If-Match'] !== etags[key]) || (hd['If-None-Match'] === '*' && saves[key])) {
+          return r(412, JSON.stringify({ error: 'precondition failed', etag: etags[key] }));
+        }
+        saves[key] = Buffer.from(JSON.parse(init.body).dataBase64, 'base64');
+        etags[key] = `"v${++version}"`;
+        return j({ etag: etags[key] });
+      }
       return saves[key] ? r(200, saves[key]) : r(404, '');
     }
     if (url.endsWith('/settings') && init.method === 'PATCH') { Object.assign(kv, JSON.parse(init.body).settings); return j({}); }
@@ -36,7 +50,7 @@ function install(href) {
   const loc = { hash: u.hash, search: u.search, pathname: u.pathname, origin: u.origin, hostname: u.hostname, href };
   globalThis.fetch = fetch;
   globalThis.StarHermit = SDK.create({ window: { location: loc, history: { replaceState() {} } }, fetch, setTimeout: () => 0, clearTimeout: () => {} });
-  return { calls, saves, kv };
+  return { calls, saves, kv, fetch, loc };
 }
 
 test('hosted: token, nickname, cloud save game:<slug>, settings, bindings, board', async () => {
@@ -58,7 +72,7 @@ test('hosted: token, nickname, cloud save game:<slug>, settings, bindings, board
 
   assert.equal(await platform.syncSettings({ theme: 'x' }), null, 'no PATCH before the KV was read');
   assert.deepEqual(await platform.loadRemoteSettings(), { theme: 'ember' });
-  await platform.syncSettings({ theme: 'ember', muted: true });
+  await platform.syncSettings({ theme: 'ember', muted: true, 'ui.language': { choice: 'de-DE' } }); // ui.* never mirrored
   const patches = h.calls.filter((c) => c.method === 'PATCH').map((c) => JSON.parse(c.init.body));
   assert.deepEqual(patches, [{ settings: { muted: true } }]);
 
@@ -86,4 +100,39 @@ test('standalone: no StarHermit request', async () => {
   assert.deepEqual(await platform.submitScore(321), { posted: false, rank: null });
   assert.ok(Math.abs(platform.now() - Date.now()) < 50, 'local clock');
   assert.equal(h.calls.length, 0);
+});
+
+test('hosted: a save that lost to another device reloads, merges and saves on top', async () => {
+  const h = install(`https://pp-slug.starhermit.com/#game_token=${TOKEN}`);
+  const { platform, mergeProgress } = await import('../src/platform.js?conflict');
+  platform.init();
+  assert.equal(await platform.loadCloud(), null); // empty slot -> next write is If-None-Match: *
+  const other = SDK.create({ window: { location: h.loc, history: { replaceState() {} } }, fetch: h.fetch, setTimeout: () => 0, clearTimeout: () => {} });
+  other.init();
+  const remote = { v: 1, settings: { theme: 'frost' }, progress: { stage: 6, stars: { 1: 3, 2: 1 }, bestScores: { stage1: 900 }, achievements: { first_completion: 50 }, tutorialDone: true, totalPlaced: 120, dailyBest: { '2026-10-01': 400 }, friends: ['a'] } };
+  assert.equal(await other.writeSave(JSON.stringify(remote)), true);
+  const local = { v: 1, settings: { theme: 'ember' }, progress: { stage: 3, stars: { 2: 3, 3: 2 }, bestScores: { stage1: 500, stage3: 700 }, achievements: { first_completion: 10, line_weaver: 20 }, tutorialDone: false, totalPlaced: 90, dailyBest: { '2026-10-01': 600 }, friends: ['b'] } };
+  platform.docProvider = () => local;
+  const got = new Promise((resolve) => { platform.onSaveConflict = resolve; });
+  platform.scheduleCloudSave();
+  assert.equal(await platform.saveCloud(true), false, 'the stale write is refused');
+  const doc = await got;
+  assert.deepEqual(doc, remote, 'onSaveConflict receives the newer doc from loadJSON');
+  const merged = mergeProgress(doc.progress, local.progress);
+  assert.deepEqual(merged, {
+    stage: 6, stars: { 1: 3, 2: 3, 3: 2 }, bestScores: { stage1: 900, stage3: 700 },
+    achievements: { first_completion: 10, line_weaver: 20 }, tutorialDone: true, totalPlaced: 120,
+    dailyBest: { '2026-10-01': 600 }, friends: ['a', 'b'],
+  });
+  platform.docProvider = () => ({ ...local, progress: merged });
+  platform.scheduleCloudSave();
+  assert.equal(await platform.saveCloud(true), true, 'the merged doc saves on top');
+  assert.equal((await other.loadJSON()).progress.stage, 6);
+});
+
+test('hosted: the settings KV mirror ignores platform ui.* keys', async () => {
+  install(`https://pp-slug.starhermit.com/#game_token=${TOKEN}`);
+  const { platform } = await import('../src/platform.js?uikeys');
+  platform.init();
+  assert.deepEqual(await platform.loadRemoteSettings(), { theme: 'ember' });
 });
