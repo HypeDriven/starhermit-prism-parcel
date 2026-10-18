@@ -19,16 +19,14 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { BOARD_SIZE, OFFER_COUNT, pieceById, canPlace } from './rules.js';
 import { themeInfo } from './content.js';
-import { detectPreset, describe, resolve, SHADOW_MAP } from './gfx.js';
+import { detectLevel, presetForLevel, describe, resolve, sparkPool, SHADOW_MAP, SPARK_MAX, MOTE_MAX } from './gfx.js';
 
 const CELL = 1;               // world units per board cell
 const GAP = 0.08;             // visual gap between blocks
 const BOARD_W = BOARD_SIZE * CELL;
 const CELL_H = 0.55;
 const OFFER_Z = BOARD_W / 2 + 2.2;
-const PARTICLE_POOL = { low: 60, high: 360 };
 const BURST = { low: 6, high: 12 };
-const MOTES = 90;
 
 // Authored camera framing constants (no magic offsets elsewhere).
 export const FRAMING = Object.freeze({
@@ -140,6 +138,15 @@ function dotTexture() {
   return tex;
 }
 
+// Run a post pass at a fraction of the frame: EffectComposer.addPass/setSize hand every pass the full
+// frame size, so the pass's own setSize applies the budget's scale (half-res bloom/GTAO below Ultra).
+function atScale(pass, k) {
+  if (!(k < 1)) return pass;
+  const setSize = pass.setSize.bind(pass);
+  pass.setSize = (w, h) => setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+  return pass;
+}
+
 export class Renderer {
   constructor(canvas, options = {}) {
     this.canvas = canvas;
@@ -157,7 +164,17 @@ export class Renderer {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     this.gpu = gpuName(this.renderer.getContext());
-    this.detected = detectPreset(this.gpu, isMobileDevice());
+    // StarHermit hardware level (src/gpu-level.js): renderer string + device facts (phone/tablet, cores,
+    // memory, screen); phones and tablets are capped at level 9 (Balanced).
+    let sys = { mobile: isMobileDevice(), webgl2: this.renderer.capabilities.isWebGL2 };
+    try {
+      const G = globalThis.StarHermitGpu;
+      if (G) { const d = G.detectSystem(); sys = { ...d, mobile: sys.mobile || d.mobile, webgl2: sys.webgl2 }; }
+    } catch (e) { /* defaults */ }
+    this.gpuLevel = detectLevel(this.gpu, sys);
+    this.detected = presetForLevel(this.gpuLevel);
+    // The scene is built with the saved preset's asset budget; setGraphics rebuilds it on a change.
+    this.q = resolve(options.graphics || {}, this.detected, this.gpuLevel);
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(info.bg);
@@ -279,16 +296,15 @@ export class Renderer {
 
   _buildTable(info) {
     // Luminous frosted tabletop: rounded slab + soft glow disc.
-    const tableGeo = new THREE.CylinderGeometry(11.5, 12.5, 0.8, 64);
-    this.tableMat = new THREE.MeshPhysicalMaterial({
-      color: info.table, roughness: 0.55, metalness: 0.15, clearcoat: 0, clearcoatRoughness: 0.5
-    });
+    const seg = this.q.budget.tableSeg;
+    const tableGeo = new THREE.CylinderGeometry(11.5, 12.5, 0.8, seg);
+    this.tableMat = this._tableMaterial();
     const table = new THREE.Mesh(tableGeo, this.tableMat);
     table.position.y = -0.85;
     this.table = table;
     this.scene.add(table);
 
-    const glowGeo = new THREE.CircleGeometry(9, 64);
+    const glowGeo = new THREE.CircleGeometry(9, seg);
     const glowMat = new THREE.MeshBasicMaterial({
       color: info.accent, transparent: true, opacity: 0.05, depthWrite: false
     });
@@ -297,14 +313,34 @@ export class Renderer {
     glow.position.y = -0.44;
     this.scene.add(glow);
     this.tableGlow = glowMat;
+    this.glow = glow;
 
-    this._tableNoise = noiseTexture(256, 7, 0);
+    this._tableNoise = noiseTexture(this.q.budget.noise, 7, 0);
     this._tableNoise.repeat.set(5, 5);
-    this._textures.push(this._tableNoise);
+  }
+
+  /**
+   * A lit material for the preset's shading budget: MeshPhysicalMaterial on High/Ultra, the same
+   * parameters without clearcoat as MeshStandardMaterial on Balanced, and MeshLambertMaterial (colour,
+   * maps and emission kept) on Low.
+   */
+  _lit(params) {
+    const tier = this.q.budget.material;
+    if (tier === 'physical') return new THREE.MeshPhysicalMaterial(params);
+    const std = {};
+    for (const [k, v] of Object.entries(params)) if (!/^clearcoat/.test(k)) std[k] = v;
+    if (tier === 'standard') return new THREE.MeshStandardMaterial(std);
+    const lam = {};
+    for (const [k, v] of Object.entries(std)) if (!/^(roughness|metalness|envMapIntensity)$/.test(k)) lam[k] = v;
+    return new THREE.MeshLambertMaterial(lam);
+  }
+
+  _tableMaterial() {
+    return this._lit({ color: this.info.table, roughness: 0.55, metalness: 0.15, clearcoat: 0, clearcoatRoughness: 0.5 });
   }
 
   _blockMaterial(color, extra = {}) {
-    return new THREE.MeshPhysicalMaterial({
+    return this._lit({
       color,
       roughness: 0.4,
       metalness: 0.02,
@@ -315,29 +351,72 @@ export class Renderer {
     });
   }
 
+  _cellMaterial() {
+    const cellMat = this._blockMaterial(0xffffff);
+    cellMat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.06;');
+    };
+    cellMat.customProgramCacheKey = () => 'pp-cell-glow';
+    return cellMat;
+  }
+
+  /** Rebuild the budget-dependent assets (shading model, bevels, noise size, table segments) on a change. */
+  _applyBudget(b) {
+    const key = [b.material, b.bevel, b.noise, b.tableSeg].join('|');
+    if (key === this._budgetKey) return;
+    const first = !this._budgetKey;
+    this._budgetKey = key;
+    if (first) return; // the constructor built the scene with this budget
+    const swap = (old, next, meshes) => { for (const m of meshes) m.material = next; old.dispose(); return next; };
+    this.tableMat = swap(this.tableMat, this._tableMaterial(), [this.table]);
+    this.plateMat = swap(this.plateMat, this._lit({ color: 0x0c0f1e, roughness: 0.4, metalness: 0.3 }), [this.plate]);
+    this.rimMat = swap(this.rimMat, this._lit({ color: 0x000000, emissive: this.info.accent, emissiveIntensity: 1.25, roughness: 1 }), this.rims);
+    this.socketMat = swap(this.socketMat, this._socketMaterial(), [this.sockets]);
+    this.cellMat = swap(this.cellMat, this._cellMaterial(), [this.cells]);
+    this._roundGeo.dispose();
+    this._roundGeo = new RoundedBoxGeometry(CELL - GAP, CELL_H, CELL - GAP, b.bevel + 1, 0.08);
+    this._tableNoise.dispose();
+    this._tableNoise = noiseTexture(b.noise, 7, 0);
+    this._tableNoise.repeat.set(5, 5);
+    this._socketNoise.dispose();
+    this._socketNoise = noiseTexture(b.noise / 2, 11, 0);
+    for (const [mesh, geo] of [[this.table, new THREE.CylinderGeometry(11.5, 12.5, 0.8, b.tableSeg)], [this.glow, new THREE.CircleGeometry(9, b.tableSeg)]]) {
+      mesh.geometry.dispose();
+      mesh.geometry = geo;
+    }
+  }
+
+  _socketMaterial() {
+    return this._lit({ color: 0x35407a, roughness: 0.75, metalness: 0.1, emissive: 0x141a3a, emissiveIntensity: 0.6 });
+  }
+
   _buildBoard(info) {
     // Base plate under the grid.
     const plateGeo = new THREE.BoxGeometry(BOARD_W + 0.7, 0.3, BOARD_W + 0.7);
-    this.plateMat = new THREE.MeshStandardMaterial({ color: 0x0c0f1e, roughness: 0.4, metalness: 0.3 });
+    this.plateMat = this._lit({ color: 0x0c0f1e, roughness: 0.4, metalness: 0.3 });
     this.plate = new THREE.Mesh(plateGeo, this.plateMat);
     this.plate.position.y = -0.16;
     this.scene.add(this.plate);
 
     // Thin emissive rim around the plate: a gentle accent line that blooms.
     const half = (BOARD_W + 0.7) / 2;
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: info.accent, emissiveIntensity: 1.25, roughness: 1 });
+    const rimMat = this._lit({ color: 0x000000, emissive: info.accent, emissiveIntensity: 1.25, roughness: 1 });
     this.rimMat = rimMat;
+    this.rims = [];
     const rimH = new THREE.BoxGeometry(BOARD_W + 0.78, 0.05, 0.05);
     const rimV = new THREE.BoxGeometry(0.05, 0.05, BOARD_W + 0.78);
     for (const [g, x, z] of [[rimH, 0, -half], [rimH, 0, half], [rimV, -half, 0], [rimV, half, 0]]) {
       const m = new THREE.Mesh(g, rimMat);
+      this.rims.push(m);
       m.position.set(x, -0.01, z);
       this.scene.add(m);
     }
 
     // Cell sockets (always visible empty wells).
     const socketGeo = new THREE.BoxGeometry(CELL - GAP, 0.06, CELL - GAP);
-    this.socketMat = new THREE.MeshStandardMaterial({ color: 0x35407a, roughness: 0.75, metalness: 0.1, emissive: 0x141a3a, emissiveIntensity: 0.6 });
+    this.socketMat = this._socketMaterial();
     this.sockets = new THREE.InstancedMesh(socketGeo, this.socketMat, BOARD_SIZE * BOARD_SIZE);
     const m = new THREE.Matrix4();
     let i = 0;
@@ -348,20 +427,13 @@ export class Renderer {
       }
     }
     this.scene.add(this.sockets);
-    this._socketNoise = noiseTexture(128, 11, 0);
-    this._textures.push(this._socketNoise);
+    this._socketNoise = noiseTexture(this.q.budget.noise / 2, 11, 0);
 
     // Occupied cells: one InstancedMesh, per-instance colour. A faint
     // self-glow keeps the frosted blocks luminous in shadow.
     this._boxGeo = new THREE.BoxGeometry(CELL - GAP, CELL_H, CELL - GAP);
-    this._roundGeo = new RoundedBoxGeometry(CELL - GAP, CELL_H, CELL - GAP, 3, 0.08);
-    const cellMat = this._blockMaterial(0xffffff);
-    cellMat.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <emissivemap_fragment>',
-        '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.06;');
-    };
-    cellMat.customProgramCacheKey = () => 'pp-cell-glow';
+    this._roundGeo = new RoundedBoxGeometry(CELL - GAP, CELL_H, CELL - GAP, this.q.budget.bevel + 1, 0.08);
+    const cellMat = this._cellMaterial();
     this.cellMat = cellMat;
     this.cells = new THREE.InstancedMesh(this._boxGeo, cellMat, BOARD_SIZE * BOARD_SIZE);
     this.cells.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -397,8 +469,8 @@ export class Renderer {
 
   _buildParticles() {
     // Bounded pooled particle bursts (additive soft sprites; bright enough to bloom).
-    const max = PARTICLE_POOL.high;
-    this.pMax = PARTICLE_POOL.low;
+    const max = SPARK_MAX; // allocated at the largest budget; the preset uses sparkPool(q) of it
+    this.pMax = sparkPool(this.q);
     const geo = new THREE.BufferGeometry();
     this.pPos = new Float32Array(max * 3).fill(-100);
     this.pVel = new Float32Array(max * 3);
@@ -420,11 +492,13 @@ export class Renderer {
   _buildMotes(info) {
     // Ambient prism dust drifting above the table (animated background only).
     const geo = new THREE.BufferGeometry();
-    this.mPos = new Float32Array(MOTES * 3);
-    this.mSeed = new Float32Array(MOTES);
+    // Allocated at the largest budget; the preset draws (and animates) q.budget.motes of them.
+    this.mPos = new Float32Array(MOTE_MAX * 3);
+    this.mSeed = new Float32Array(MOTE_MAX);
+    this.mLive = this.q.budget.motes;
     let s = 12345;
     const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-    for (let i = 0; i < MOTES; i++) {
+    for (let i = 0; i < MOTE_MAX; i++) {
       const a = rnd() * Math.PI * 2, r = 4 + rnd() * 14;
       this.mPos[i * 3] = Math.cos(a) * r;
       this.mPos[i * 3 + 1] = rnd() * 9 - 1;
@@ -469,9 +543,11 @@ export class Renderer {
     const json = JSON.stringify(saved || {});
     if (json === this._gfxJson) return; // unrelated settings changed
     this._gfxJson = json;
-    const g = resolve(saved || {}, this.detected);
-    const prev = this.q;
+    const g = resolve(saved || {}, this.detected, this.gpuLevel);
+    const prev = this._applied;
+    this._applied = g;
     this.q = g;
+    this._applyBudget(g.budget);
 
     // Shadows.
     const size = SHADOW_MAP[g.shadows];
@@ -516,10 +592,12 @@ export class Renderer {
     this.socketMat.envMapIntensity = 0.2;
 
     // Particles.
-    this.pMax = PARTICLE_POOL[g.particles];
+    this.pMax = sparkPool(g);
     this.pNext %= this.pMax;
-    for (let k = this.pMax; k < PARTICLE_POOL.high; k++) { this.pLife[k] = 0; this.pPos[k * 3 + 1] = -100; }
+    for (let k = this.pMax; k < SPARK_MAX; k++) { this.pLife[k] = 0; this.pPos[k * 3 + 1] = -100; }
     this.points.geometry.attributes.position.needsUpdate = true;
+    this.mLive = g.budget.motes;
+    this.motes.geometry.setDrawRange(0, this.mLive);
 
     this._applyMotion();
     if (this._lastOffer) this.applyOffer(this._lastOffer, this._selectedSlot);
@@ -542,6 +620,7 @@ export class Renderer {
     const px = [Math.round(this.size[0] * this.pixelRatio), Math.round(this.size[1] * this.pixelRatio)];
     return {
       gpu: this.gpu || 'unknown GPU',
+      level: this.gpuLevel,
       detected: this.detected,
       resolved: this.q,
       summary: describe(this.q, px, words),
@@ -573,7 +652,7 @@ export class Renderer {
 
   _postKey(w, h) {
     const g = this.q;
-    return g.post ? [g.ao, g.bloom, g.grade, g.antialias, w, h, this.pixelRatio].join('|') : 'none';
+    return g.post ? [g.ao, g.bloom, g.grade, g.antialias, g.budget.aoRes, g.budget.bloomRes, w, h, this.pixelRatio].join('|') : 'none';
   }
 
   _disposeComposer() {
@@ -602,11 +681,11 @@ export class Renderer {
         ao.blendIntensity = 0.7;
         ao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.4, thickness: 1.2, scale: 1.0, samples: g.ao === 'high' ? 16 : 8 });
         ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: g.ao === 'high' ? 6 : 4, rings: 2, samples: g.ao === 'high' ? 16 : 8 });
-        composer.addPass(ao);
+        composer.addPass(atScale(ao, g.budget.aoRes));
       }
       if (g.bloom === 'on') {
         // High threshold: only emissive trims, sparks and specular glints bloom.
-        composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.32, 0.35, 0.9));
+        composer.addPass(atScale(new UnrealBloomPass(new THREE.Vector2(w, h), 0.32, 0.35, 0.9), g.budget.bloomRes));
       }
       if (g.grade === 'on') composer.addPass(new ShaderPass(GradeShader));
       composer.addPass(new OutputPass());
@@ -762,7 +841,7 @@ export class Renderer {
       const group = new THREE.Group();
       const hue = palette[slot.hue % palette.length];
       const mat = this._blockMaterial(hue, { emissive: hue, emissiveIntensity: 0.1 });
-      const geo = detailed ? new RoundedBoxGeometry(0.62, 0.4, 0.62, 2, 0.06) : new THREE.BoxGeometry(0.62, 0.4, 0.62);
+      const geo = detailed ? new RoundedBoxGeometry(0.62, 0.4, 0.62, this.q.budget.bevel, 0.06) : new THREE.BoxGeometry(0.62, 0.4, 0.62);
       let minR = 99, maxR = -99, minC = 99, maxC = -99;
       for (const [dr, dc] of piece.cells) {
         minR = Math.min(minR, dr); maxR = Math.max(maxR, dr);
@@ -975,7 +1054,7 @@ export class Renderer {
     if (this._ambient) {
       const t = this._time;
       this.tableGlow.opacity = 0.06 + 0.025 * Math.sin(t * 0.8);
-      for (let i = 0; i < MOTES; i++) {
+      for (let i = 0; i < this.mLive; i++) {
         const sd = this.mSeed[i];
         this.mPos[i * 3 + 1] += dt * (0.12 + (sd % 1) * 0.1);
         this.mPos[i * 3] += Math.sin(t * 0.3 + sd) * dt * 0.08;
@@ -1046,6 +1125,7 @@ export class Renderer {
     });
     this._boxGeo.dispose(); this._roundGeo.dispose();
     for (const t of this._textures) t.dispose();
+    this._tableNoise.dispose(); this._socketNoise.dispose();
     this._dot.dispose();
     if (this._envTex) this._envTex.dispose();
     this.renderer.dispose();

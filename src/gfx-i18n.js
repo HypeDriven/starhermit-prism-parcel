@@ -21,7 +21,7 @@ const en = {
     off: 'Off', on: 'On', static: 'Static', animated: 'Animated', plain: 'Plain', detailed: 'Detailed',
     fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA'
   },
-  words: { noShadows: 'no shadows', shadows: 'shadows', ao: 'AO', fullAo: 'full AO', bloom: 'bloom', reflections: 'reflections', noAa: 'no AA' }
+  words: { noShadows: 'no shadows', shadows: 'shadows', ao: 'AO', fullAo: 'full AO', bloom: 'bloom', reflections: 'reflections', noAa: 'no AA', level: 'Level {n}' }
 };
 
 const STRINGS = {
@@ -45,7 +45,7 @@ const STRINGS = {
       off: 'Desactivado', on: 'Activado', static: 'Estático', animated: 'Animado', plain: 'Simple', detailed: 'Detallado',
       fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA'
     },
-    words: { noShadows: 'sin sombras', shadows: 'sombras', ao: 'AO', fullAo: 'AO completa', bloom: 'resplandor', reflections: 'reflejos', noAa: 'sin AA' }
+    words: { noShadows: 'sin sombras', shadows: 'sombras', ao: 'AO', fullAo: 'AO completa', bloom: 'resplandor', reflections: 'reflejos', noAa: 'sin AA', level: 'Nivel {n}' }
   },
   'es-ES': {
     tabGeneral: 'General', tabGraphics: 'Gráficos',
@@ -62,7 +62,7 @@ const STRINGS = {
       off: 'Desactivado', on: 'Activado', static: 'Estático', animated: 'Animado', plain: 'Sencillo', detailed: 'Detallado',
       fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA'
     },
-    words: { noShadows: 'sin sombras', shadows: 'sombras', ao: 'AO', fullAo: 'AO completa', bloom: 'resplandor', reflections: 'reflejos', noAa: 'sin AA' }
+    words: { noShadows: 'sin sombras', shadows: 'sombras', ao: 'AO', fullAo: 'AO completa', bloom: 'resplandor', reflections: 'reflejos', noAa: 'sin AA', level: 'Nivel {n}' }
   },
   'de-DE': {
     tabGeneral: 'Allgemein', tabGraphics: 'Grafik',
@@ -79,7 +79,7 @@ const STRINGS = {
       off: 'Aus', on: 'An', static: 'Statisch', animated: 'Animiert', plain: 'Schlicht', detailed: 'Detailliert',
       fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA'
     },
-    words: { noShadows: 'keine Schatten', shadows: 'Schatten', ao: 'AO', fullAo: 'volle AO', bloom: 'Leuchten', reflections: 'Spiegelungen', noAa: 'keine Glättung' }
+    words: { noShadows: 'keine Schatten', shadows: 'Schatten', ao: 'AO', fullAo: 'volle AO', bloom: 'Leuchten', reflections: 'Spiegelungen', noAa: 'keine Glättung', level: 'Stufe {n}' }
   },
   'fr-FR': {
     tabGeneral: 'Général', tabGraphics: 'Graphismes',
@@ -96,7 +96,7 @@ const STRINGS = {
       off: 'Désactivé', on: 'Activé', static: 'Statique', animated: 'Animé', plain: 'Simple', detailed: 'Détaillé',
       fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA'
     },
-    words: { noShadows: 'sans ombres', shadows: 'ombres', ao: 'AO', fullAo: 'AO complète', bloom: 'halo', reflections: 'reflets', noAa: 'sans anticrénelage' }
+    words: { noShadows: 'sans ombres', shadows: 'ombres', ao: 'AO', fullAo: 'AO complète', bloom: 'halo', reflections: 'reflets', noAa: 'sans anticrénelage', level: 'Niveau {n}' }
   },
   'fr-CA': {
     tabGeneral: 'Général', tabGraphics: 'Graphiques',
@@ -113,7 +113,7 @@ const STRINGS = {
       off: 'Désactivé', on: 'Activé', static: 'Statique', animated: 'Animé', plain: 'Simple', detailed: 'Détaillé',
       fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA'
     },
-    words: { noShadows: 'sans ombres', shadows: 'ombres', ao: 'AO', fullAo: 'AO complète', bloom: 'halo', reflections: 'reflets', noAa: 'sans anticrénelage' }
+    words: { noShadows: 'sans ombres', shadows: 'ombres', ao: 'AO', fullAo: 'AO complète', bloom: 'halo', reflections: 'reflets', noAa: 'sans anticrénelage', level: 'Niveau {n}' }
   },
   'pt-BR': {
     tabGeneral: 'Geral', tabGraphics: 'Gráficos',
@@ -130,7 +130,7 @@ const STRINGS = {
       off: 'Desligado', on: 'Ligado', static: 'Estático', animated: 'Animado', plain: 'Simples', detailed: 'Detalhado',
       fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA'
     },
-    words: { noShadows: 'sem sombras', shadows: 'sombras', ao: 'AO', fullAo: 'AO completa', bloom: 'brilho', reflections: 'reflexos', noAa: 'sem AA' }
+    words: { noShadows: 'sem sombras', shadows: 'sombras', ao: 'AO', fullAo: 'AO completa', bloom: 'brilho', reflections: 'reflexos', noAa: 'sem AA', level: 'Nível {n}' }
   },
   'it-IT': {
     tabGeneral: 'Generale', tabGraphics: 'Grafica',
@@ -147,7 +147,7 @@ const STRINGS = {
       off: 'Disattivato', on: 'Attivato', static: 'Statico', animated: 'Animato', plain: 'Semplice', detailed: 'Dettagliato',
       fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA'
     },
-    words: { noShadows: 'senza ombre', shadows: 'ombre', ao: 'AO', fullAo: 'AO completa', bloom: 'bagliore', reflections: 'riflessi', noAa: 'senza AA' }
+    words: { noShadows: 'senza ombre', shadows: 'ombre', ao: 'AO', fullAo: 'AO completa', bloom: 'bagliore', reflections: 'riflessi', noAa: 'senza AA', level: 'Livello {n}' }
   }
 };
 

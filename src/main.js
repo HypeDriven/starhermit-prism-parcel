@@ -332,7 +332,8 @@ function updateGraphicsInfo() {
   const el = $('gfx-summary');
   if (!el || !renderer) return;
   const info = renderer.graphicsInfo(GS.words);
-  el.textContent = `${info.gpu} · ${info.summary}` + (info.resolved.showFps && info.fps ? ` · ${info.fps} fps` : '');
+  el.textContent = [info.gpu, info.level != null ? GS.words.level.replace('{n}', info.level) : null, info.summary].filter(Boolean).join(' · ')
+    + (info.resolved.showFps && info.fps ? ` · ${info.fps} fps` : '');
   $('gfx-post-note').hidden = !info.postFailed;
 }
 
@@ -345,7 +346,7 @@ function buildGraphicsSettings() {
   const g = settings.graphics;
   const detected = renderer ? renderer.detected : 'balanced';
   const tierName = (t) => GS.tier[t] || t;
-  const current = resolveGfx(g, detected);
+  const current = resolveGfx(g, detected, renderer ? renderer.gpuLevel : undefined);
   const row = (label, control, id) => {
     const l = document.createElement('label');
     const span = document.createElement('span');

@@ -137,6 +137,7 @@ async function runPass(vpName, viewport, hasTouch, baseURL) {
       if ((await page.getAttribute('#gl', 'data-gfx-preset')) !== 'high') throw new Error('high not applied');
       const summary = await page.textContent('#gfx-summary');
       if (!/2048² shadows/.test(summary)) throw new Error(`summary not updated: ${summary}`);
+      if (!/ · Level 0 · /.test(summary)) throw new Error(`summary lacks the hardware level: ${summary}`);
       await page.selectOption('#gfx-bloom', 'off');
       const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('prism-parcel:settings:v1')).graphics);
       if (stored.preset !== 'high' || stored.bloom !== 'off') throw new Error('graphics not persisted: ' + JSON.stringify(stored));
