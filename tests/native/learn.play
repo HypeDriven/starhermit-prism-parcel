@@ -1,0 +1,32 @@
+# Learn to Play: lesson 1 by pointer (the tray's first piece, then a board
+# cell by its screen-reader name), the next lessons by hint and Enter (lesson
+# 2 needs a cleared line) until the lessons end; then pause and leave.
+until 300 Play
+frames 30
+click =Learn to Play
+until 120 1/5 — Place a parcel
+frames 30
+save learn-1
+click =Select Twin Column, slot 1
+frames 5
+click =Row 1 column 1, empty
+until 30 2/5 — Fill lines
+frames 5
+expect =Row 1 column 1, occupied
+repeat 3000 until 5/5 — Watch the board
+  key KeyH 1
+  frames 3
+  key Enter 1
+  frames 12
+end
+frames 10
+save learn-5
+key KeyH 1
+frames 3
+key Enter 1
+frames 30
+key Escape 1
+until 60 =Resume
+frames 10
+click =Leave Round
+until 120 Journey stage 1/40

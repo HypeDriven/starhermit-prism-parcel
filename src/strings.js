@@ -245,6 +245,11 @@ const ROWS = [
   ['New pieces offered.', 'Neue Teile im Angebot.', 'Nuevas piezas ofrecidas.', 'Nouvelles pièces proposées.', 'Novas peças oferecidas.', 'Nuovi pezzi offerti.'],
   ['Goal complete.', 'Ziel erreicht.', 'Objetivo cumplido.', 'Objectif atteint.', 'Meta cumprida.', 'Obiettivo raggiunto.'],
   ['Round over.', 'Runde vorbei.', 'Ronda terminada.', 'Manche terminée.', 'Rodada encerrada.', 'Round finito.'],
+  // engine client: the runtime's Options and the cloud save
+  ['Sound, graphics, language, larger text, high contrast and reduced motion are in the StarHermit Options.', 'Ton, Grafik, Sprache, größere Schrift, hoher Kontrast und reduzierte Bewegung findest du in den StarHermit-Optionen.', 'El sonido, los gráficos, el idioma, el texto más grande, el alto contraste y el movimiento reducido están en las Opciones de StarHermit.', 'Le son, les graphismes, la langue, le texte agrandi, le contraste élevé et les animations réduites se trouvent dans les Options StarHermit.', 'Som, gráficos, idioma, texto maior, alto contraste e movimento reduzido ficam nas Opções do StarHermit.', 'Audio, grafica, lingua, testo più grande, contrasto elevato e movimento ridotto sono nelle Opzioni di StarHermit.'],
+  ['Open Options', 'Optionen öffnen', 'Abrir Opciones', 'Ouvrir les options', 'Abrir Opções', 'Apri Opzioni'],
+  ['Key bindings', 'Tastenbelegung', 'Asignación de teclas', 'Affectation des touches', 'Atalhos de teclado', 'Assegnazione tasti'],
+  ['Progress restored from your StarHermit cloud save.', 'Fortschritt aus deinem StarHermit-Cloud-Spielstand wiederhergestellt.', 'Progreso restaurado desde tu partida guardada en la nube de StarHermit.', 'Progression restaurée depuis votre sauvegarde en ligne StarHermit.', 'Progresso restaurado do seu salvamento na nuvem do StarHermit.', 'Progressi ripristinati dal salvataggio cloud di StarHermit.'],
 ];
 
 const table = (col) => Object.fromEntries(ROWS.map((r) => [r[0], r[col + 1]]));

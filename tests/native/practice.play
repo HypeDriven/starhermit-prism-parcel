@@ -1,0 +1,60 @@
+# Practice on a wide window (the rails beside the board): Easy, Start; a piece
+# dragged from the 3D offer row onto the board, Undo, a hint placed by Enter,
+# the selection cleared (C), the settings from the pause panel (Ember theme,
+# colour-safe palette), help, then back to the round.
+# viewport 1280x800
+until 300 Play
+frames 30
+click =Practice
+until 60 Free play with undo
+frames 10
+click =Easy
+frames 5
+expect Small pieces, generous fits.
+click =Start
+until 120 Practice: play freely
+frames 40
+expect Controls
+expect Moves
+save practice-start
+drag 33.2% 70.6% 50% 30% 12
+frames 20
+expect occupied
+save practice-dragged
+click =Undo
+frames 20
+key KeyH 1
+frames 5
+key Enter 1
+frames 20
+expect occupied
+key Digit2 1
+frames 5
+key KeyC 1
+frames 5
+key Escape 1
+until 60 =Resume
+frames 10
+click =Settings
+until 60 Visual theme
+frames 10
+click =Aurora
+frames 10
+click =Ember
+frames 10
+click =Color-vision-safe palette
+frames 10
+save practice-settings
+click =Done
+until 60 =Resume
+frames 10
+click =Help
+until 60 The rules
+frames 10
+save practice-help
+click =Close
+until 60 =Resume
+frames 5
+click =Resume
+frames 30
+save practice-ember

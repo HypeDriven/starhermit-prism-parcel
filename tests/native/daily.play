@@ -1,0 +1,24 @@
+# The Daily Challenge: today's seed and par, then hints and Enter until no
+# piece fits; the results compare with today's best (this device).
+until 300 Play
+frames 30
+click =Daily Challenge
+until 60 One shared seed
+frames 10
+expect Next daily in
+save daily-setup
+click =Start
+until 120 Daily: highest score
+frames 30
+repeat 12000 until Round Over
+  key KeyH 1
+  frames 3
+  key Enter 1
+  frames 10
+end
+frames 30
+expect No offered piece fits on the board.
+expect Daily complete — best today:
+save daily-results
+click =Home
+until 60 Learn to Play

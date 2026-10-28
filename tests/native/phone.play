@@ -1,0 +1,31 @@
+# A 390×844 phone at DPR 3 by touch: the title, Practice, the round (the
+# score-only HUD, the tray), a piece and a cell tapped, the info drawer, the
+# pause panel.
+# viewport 390x844@3
+until 300 Play
+frames 30
+save phone-title
+touch =Practice
+until 60 Free play with undo
+frames 10
+touch =Start
+until 120 Hint
+frames 40
+save phone-game
+touch Select
+frames 10
+touch =Row 5 column 5, empty
+frames 20
+expect occupied
+touch =Open info panel
+until 30 Objective
+frames 10
+save phone-drawer
+touch =Open info panel
+frames 10
+touch =Pause
+until 60 =Resume
+frames 10
+save phone-paused
+touch =Resume
+frames 10

@@ -1,0 +1,39 @@
+# Journey: the title's Journey opens the stage grid; stage 1 starts; the hint
+# (H) and Enter place pieces until the goal is met; the results show the score
+# breakdown, Next starts stage 2 (now unlocked), which is paused and left.
+until 300 Play
+frames 30
+click =Journey
+until 60 40 authored stages
+frames 10
+expect Stage 2, Easy, locked
+click =Start
+until 120 Goal: 150 points
+frames 30
+expect =Row 1 column 1, empty
+repeat 4000 until Goal Complete!
+  key KeyH 1
+  frames 3
+  key Enter 1
+  frames 12
+end
+frames 30
+expect Objective reached. Journey stage 1.
+expect Total score
+expect Achievements: First Light
+save journey-results
+click =Next
+until 120 Goal: 200 points
+frames 20
+click =Open info panel
+until 30 Journey 2
+click =Open info panel
+frames 5
+click =Pause
+until 60 =Resume
+frames 10
+save journey-paused
+click =Leave Round
+until 120 Journey stage 2/40
+frames 10
+expect Rank: Novice Wrapper

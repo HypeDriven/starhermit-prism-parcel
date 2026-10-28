@@ -1,0 +1,47 @@
+# The title's panels: Help & Rules and Settings over the title, the Journey
+# grid (stage 1 picked) and back; a Practice round left mid-way resumes from
+# Play with its board (the round snapshot).
+until 300 Play
+frames 30
+save screens-title
+click =Help & Rules
+until 60 The rules
+frames 10
+expect Grand Square (9)
+key Escape 1
+until 60 Learn to Play
+frames 10
+click =Settings
+until 60 Visual theme
+frames 10
+save screens-settings
+click =Done
+until 60 Learn to Play
+frames 10
+click =Journey
+until 60 40 authored stages
+frames 10
+save screens-journey
+click =Back
+until 60 Learn to Play
+frames 10
+click =Practice
+until 60 Free play with undo
+frames 5
+click =Start
+until 120 Practice: play freely
+frames 30
+key KeyH 1
+frames 3
+key Enter 1
+frames 20
+key Escape 1
+until 60 =Resume
+frames 5
+click =Leave Round
+until 60 Learn to Play
+frames 10
+click =Play
+until 120 Practice: play freely
+frames 10
+expect occupied
