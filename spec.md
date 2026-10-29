@@ -1,7 +1,7 @@
 # Prism Parcel — Game Specification
 
 **Genre:** spatial block puzzle · **Players:** 1 (asynchronous high-score board) ·
-**Runs on:** the StarHermit engine 1.22.0 (`engine.minor=20`), natively in the StarHermit client and in
+**Runs on:** the StarHermit engine 1.23.0 (`engine.minor=20`), natively in the StarHermit client and in
 browsers through the engine's web runtime (`index.html` is the engine's loader) ·
 **Locales:** en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT.
 
