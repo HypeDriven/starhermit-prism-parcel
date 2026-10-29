@@ -24,7 +24,7 @@ import {
   ACESFilmicToneMapping, AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, CircleGeometry, Color,
   CylinderGeometry, DirectionalLight, DoubleSide, DynamicDrawUsage, Fog, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, MeshPhysicalMaterial, MeshStandardMaterial, NoColorSpace, PerspectiveCamera, PlaneGeometry, Plane, PMREMGenerator,
-  Points, PointsMaterial, Raycaster, RepeatWrapping, RingGeometry, RoomEnvironment, RoundedBoxGeometry, SRGBColorSpace, SphereGeometry,
+  OrthographicCamera, Points, PointsMaterial, Raycaster, RepeatWrapping, RingGeometry, RoomEnvironment, RoundedBoxGeometry, SRGBColorSpace, SphereGeometry,
   TextureLoader, Vector2, Vector3, renderer, scene, type Material, type Object3D, type Texture,
 } from "starhermit:scene";
 import { OffscreenCanvas } from "starhermit:canvas";
@@ -59,6 +59,28 @@ const camBase = new Vector3(0, FRAMING.height, FRAMING.distance);
 const raycaster = new Raycaster();
 const floor = new Plane(new Vector3(0, 1, 0), 0);
 const zero = new Matrix4().makeScale(0, 0, 0);
+
+/** The page's key-light ortho box, fitted tightly around the play area (board, offer row) in light space. */
+function fitShadow(key: DirectionalLight): void {
+  const o = key.position, t = key.target.position;
+  const z = new Vector3().subVectors(o, t).normalize();
+  const x = new Vector3(0, 1, 0).cross(z).normalize();
+  const y = new Vector3().crossVectors(z, x);
+  const lo = [-6.8, -0.5, -BOARD_W / 2 - 0.6], hi = [6.8, 1.4, OFFER_Z + 1.8];
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  const d = new Vector3();
+  for (let i = 0; i < 8; i++) {
+    d.set(i & 1 ? hi[0]! : lo[0]!, i & 2 ? hi[1]! : lo[1]!, i & 4 ? hi[2]! : lo[2]!).sub(o);
+    const px = d.dot(x), py = d.dot(y), pz = d.dot(z);
+    minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+    minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+    minZ = Math.min(minZ, pz); maxZ = Math.max(maxZ, pz);
+  }
+  const cam = key.shadow.camera as OrthographicCamera;
+  cam.left = minX; cam.right = maxX; cam.bottom = minY; cam.top = maxY;
+  cam.near = Math.max(0.1, -maxZ - 1); cam.far = -minZ + 1;
+  cam.updateProjectionMatrix();
+}
 
 // textures
 const loader = new TextureLoader();
@@ -170,17 +192,17 @@ function build(): void {
   backdrop.renderOrder = -1;
   backdropColors();
   scene.add(backdrop);
-  // the lights (÷ π: three r185 physical units → the engine's legacy units)
-  keyLight = new DirectionalLight(info.key, 2.4 / Math.PI);
+  // the lights (three r185 physical units, as engine minor 23+ takes them)
+  keyLight = new DirectionalLight(info.key, 2.4);
   keyLight.position.set(6, 14, 8);
   keyLight.target.position.set(0, 0, 1);
   keyLight.shadow.bias = -0.0004;
-  keyLight.shadow.normalBias = 1.5;
-  keyLight.shadow.distance = 70;
+  keyLight.shadow.normalBias = 0.02;
+  fitShadow(keyLight);
   scene.add(keyLight, keyLight.target);
-  fill = new HemisphereLight(info.fill, info.bg, 0.9 / Math.PI);
+  fill = new HemisphereLight(info.fill, info.bg, 0.9);
   scene.add(fill);
-  rimLight = new DirectionalLight(info.accent, 0.6 / Math.PI);
+  rimLight = new DirectionalLight(info.accent, 0.6);
   rimLight.position.set(-8, 6, -6);
   scene.add(rimLight);
   // the table
