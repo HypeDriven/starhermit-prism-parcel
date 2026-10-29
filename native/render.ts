@@ -132,6 +132,7 @@ let offerGroup: Group;
 let offerViews: (Group | null)[] = [null, null, null];
 const offerMats: (MeshStandardMaterial | MeshLambertMaterial | null)[] = [null, null, null];
 const offerSlotOf = new Map<Object3D, number>();
+const offerHitMat = new MeshBasicMaterial();
 let selected: number | null = null;
 let lastOffer: (Slot | null)[] | null = null;
 const cellState = new Int8Array(N * N);
@@ -486,6 +487,13 @@ export function applyOffer(offer: (Slot | null)[], sel: number | null): void {
       group.add(mesh);
       offerSlotOf.set(mesh, i);
     }
+    // An unseen hit box over the piece's whole footprint, so a press in the
+    // gap between its blocks (a square's or a bar's centre) still picks it.
+    const hit = new Mesh(new BoxGeometry((maxC - minC) * 0.7 + 0.62, 0.4, (maxR - minR) * 0.7 + 0.62), offerHitMat);
+    hit.position.set(0, 0.25, 0);
+    hit.visible = false; // the ray still hits it (engine minor 18+, as three.js)
+    group.add(hit);
+    offerSlotOf.set(hit, i);
     group.position.set((i - 1) * 3.7, 0, 0);
     offerGroup.add(group);
     offerViews[i] = group;
