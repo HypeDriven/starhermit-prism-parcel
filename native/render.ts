@@ -357,17 +357,17 @@ export function applyLook(next: Look): void {
   motes.geometry.setDrawRange(0, mLive);
   applyMotion();
   // UnrealBloomPass(0.32, 0.35, 0.9): only emissive trims, sparks and specular glints bloom.
-  // three r185 page: bloom strength as written (engine.minor 29 follows r185).
+  // three r185 page: bloom strength as written (the engine default r185 model).
   renderer.bloom = next.bloom ? { strength: 0.32, radius: 0.35, threshold: 0.9, resolution: next.budget.bloomRes } : null;
   // GTAOPass: radius 0.6, distance exponent 1.4, thickness 1.2; 16 / 8 samples and the denoise per tier; blend 0.7.
   renderer.ao = next.ao === "off" ? null : {
     blendIntensity: 0.7, radius: 0.6, distanceExponent: 1.4, thickness: 1.2, scale: 1, samples: next.ao === "high" ? 16 : 8, resolution: next.budget.aoRes,
     denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
   };
-  // GradeShader on the linear buffer before the tone mapping: an 0.18 S-curve, saturation 1.1, cool shadows /
+  // GradeShader on the linear buffer before the tone mapping: an 0.18 smoothstep S-curve (contrastCurve "s"), saturation 1.1, cool shadows /
   // warm highlights by a smoothstep of luma from 0.2 to 0.8, a 0.24 vignette from 0.38 to 0.9.
   renderer.grade = next.grade ? {
-    space: "linear", overRange: "keep", contrast: 0.18, saturation: 1.1, split: [0.2, 0.8], shadows: [0.97, 0.99, 1.05], highlights: [1.03, 1.0, 0.97],
+    space: "linear", contrastCurve: "s", overRange: "keep", contrast: 0.18, saturation: 1.1, split: [0.2, 0.8], shadows: [0.97, 0.99, 1.05], highlights: [1.03, 1.0, 0.97],
     vignette: { amount: 0.24, inner: 0.38, outer: 0.9, scale: [1, 1] },
   } : null;
   renderer.antialias = next.antialias;
