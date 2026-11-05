@@ -1,0 +1,17 @@
+# Tier bench: a Practice round on Easy, a piece dragged onto the board, sparks and motes alive.
+# viewport 1280x800
+until 300 Play
+frames 30
+click =Practice
+until 60 Free play with undo
+frames 10
+click =Easy
+frames 5
+click =Start
+until 120 Practice: play freely
+frames 120
+measure start
+frames 150
+drag 33.2% 70.6% 50% 30% 12
+frames 440
+measure stop

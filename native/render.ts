@@ -328,7 +328,7 @@ export function applyLook(next: Look): void {
   const on = next.shadows > 0;
   renderer.shadowMap.enabled = on;
   keyLight.castShadow = on;
-  if (on) keyLight.shadow.mapSize = next.shadows;
+  if (on) keyLight.shadow.mapSize = next.shadows; // the level's size: at minor ≥ 23 the engine keeps whatever the game sets
   keyLight.shadow.radius = next.shadows === 4096 ? 3 : 1.5;
   for (const o of [table, plate, sockets]) o.receiveShadow = on;
   cells.castShadow = cells.receiveShadow = on;
@@ -358,11 +358,12 @@ export function applyLook(next: Look): void {
   applyMotion();
   // UnrealBloomPass(0.32, 0.35, 0.9): only emissive trims, sparks and specular glints bloom.
   // three r185 page: bloom strength as written (the engine default r185 model).
-  renderer.bloom = next.bloom ? { strength: 0.32, radius: 0.35, threshold: 0.9, resolution: next.budget.bloomRes } : null;
+  renderer.bloom = next.bloom === null ? null : { strength: 0.32, radius: 0.35, threshold: 0.9, resolution: next.bloom };
   // GTAOPass: radius 0.6, distance exponent 1.4, thickness 1.2; 16 / 8 samples and the denoise per tier; blend 0.7.
-  renderer.ao = next.ao === "off" ? null : {
-    blendIntensity: 0.7, radius: 0.6, distanceExponent: 1.4, thickness: 1.2, scale: 1, samples: next.ao === "high" ? 16 : 8, resolution: next.budget.aoRes,
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
+  const ao = next.ao, aoFull = !!ao && ao.resolution >= 1;
+  renderer.ao = ao && {
+    blendIntensity: 0.7, radius: 0.6, distanceExponent: 1.4, thickness: 1.2, scale: 1, samples: ao.samples, resolution: ao.resolution,
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: aoFull ? 6 : 4, rings: 2, samples: ao.denoiseSamples, radiusExponent: 2 },
   };
   // GradeShader on the linear buffer before the tone mapping: an 0.18 smoothstep S-curve (contrastCurve "s"), saturation 1.1, cool shadows /
   // warm highlights by a smoothstep of luma from 0.2 to 0.8, a 0.24 vignette from 0.38 to 0.9.

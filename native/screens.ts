@@ -69,26 +69,9 @@ function button(b: Btn): void {
   if (b.height != null) s.height = b.height;
   if (ui.style(style, s).id(b.id).button(b.name ?? b.text, opts) && fresh()) later(b.act);
 }
-/** Buttons at their own widths (or `stretch`ed) in rows that wrap at `width` (flex-wrap), centred or from the start. */
-function flow(label: string, list: Btn[], width: number, gap = 9.6, stretch = false, justify: "start" | "center" = "center"): void {
-  const rows: Btn[][] = [[]];
-  let used = 0;
-  const bw = (b: Btn): number => Math.min(width, b.width ?? buttonWidth(b.text, b.style ?? "btn"));
-  for (const b of list) {
-    const w = bw(b);
-    if (rows[rows.length - 1]!.length && used + gap + w > width) { rows.push([]); used = 0; }
-    used += (rows[rows.length - 1]!.length ? gap : 0) + w;
-    rows[rows.length - 1]!.push(b);
-  }
-  ui.column(label, () => {
-    rows.forEach((row, ri) => ui.row(`${label}-r${ri}`, () => {
-      if (stretch) {
-        const total = row.reduce((n, b) => n + bw(b), 0);
-        const extra = (width - total - gap * (row.length - 1)) / row.length;
-        for (const b of row) button({ ...b, width: bw(b) + extra });
-      } else for (const b of row) button(b);
-    }, { spacing: gap, width, justify, align: "center" }));
-  }, { spacing: gap, width });
+/** Buttons at their own widths in rows that wrap at `width` (flex-wrap), centred or from the start. */
+function flow(label: string, list: Btn[], width: number, gap = 9.6, justify: "start" | "center" = "center"): void {
+  ui.row(label, () => { for (const b of list) button(b); }, { wrap: true, width, gap, justify, align: "center" });
 }
 function rect(r: ui.Rect): void { hudRects.push({ x: r.x, y: r.y, width: r.width, height: r.height }); }
 /** A box over a window rectangle (window px) drawn by a placed role-none widget. */
@@ -420,7 +403,7 @@ function setupScreen(L: Layout): void {
     flow("setup-actions", [
       { id: "setup-start", text: T("Start"), style: "btn-primary", act: startSetup },
       { id: "setup-back", text: T("Back"), style: "btn-ghost", act: goTitle },
-    ], inner, 9.6, false, "center");
+    ], inner, 9.6, "center");
   }, { style: "panel", width: w, spacing: 12 });
 }
 function startSetup(): void {
@@ -480,7 +463,7 @@ function practiceSetup(w: number): void {
   flow("practice-difficulty", Content.DIFFICULTIES.map((d) => ({
     id: `diff-${d}`, text: T(Content.DIFFICULTY_INFO[d]!.name), style: app.setup.difficulty === d ? "btn-primary" : "btn", selected: app.setup.difficulty === d,
     tooltip: T(Content.DIFFICULTY_INFO[d]!.desc), act: () => { app.setup.difficulty = d; },
-  })), w, 9.6, false, "center");
+  })), w, 9.6, "center");
   para(T(Content.DIFFICULTY_INFO[app.setup.difficulty]!.desc), w, "small", "practice-desc");
 }
 
@@ -510,7 +493,7 @@ function resultsScreen(L: Layout): void {
     const btns: Btn[] = [{ id: "btn-retry", text: T("Retry"), style: "btn-primary", act: retry }];
     if (round.mode === "journey" && s.won && (round.stageId ?? 0) < Content.stageCount()) btns.push({ id: "btn-next", text: T("Next"), act: nextStage });
     btns.push({ id: "btn-results-home", text: T("Home"), style: "btn-ghost", act: goTitle });
-    flow("results-actions", btns, inner, 9.6, false, "center");
+    flow("results-actions", btns, inner, 9.6, "center");
   }, { style: "panel", width: w, spacing: 10 });
 }
 
@@ -572,7 +555,7 @@ function settingsPanel(L: Layout): void {
     flow("settings-runtime", [
       { id: "btn-options", text: T("Open Options"), act: () => openMenu() },
       { id: "btn-rebind", text: T("Key bindings"), act: () => requestRebind() },
-    ], iw, 9.6, false, "start");
+    ], iw, 9.6, "start");
     ui.row("set-theme-row", () => {
       para(T("Visual theme"), iw * 0.42, "text", "set-theme-label");
       ui.spacer();
@@ -589,7 +572,7 @@ function settingsPanel(L: Layout): void {
       ui.spacer();
       button({ id: "btn-replay-tutorial", text: T("Replay tutorial"), act: replayTutorial });
     }, { width: iw, align: "center" });
-  }, closeOverlay, (iw) => flow("settings-done", [{ id: "btn-settings-close", text: T("Done"), style: "btn-primary", act: closeOverlay }], iw, 9.6, false, "center"));
+  }, closeOverlay, (iw) => flow("settings-done", [{ id: "btn-settings-close", text: T("Done"), style: "btn-primary", act: closeOverlay }], iw, 9.6, "center"));
 }
 const GLYPH: Record<string, string> = { "Arrow Up": "↑", "Arrow Down": "↓", "Arrow Left": "←", "Arrow Right": "→", Escape: "Esc" };
 function keys(action: string): string {
@@ -633,5 +616,5 @@ function helpPanel(L: Layout): void {
       rows[rows.length - 1]!.push(c);
     }
     rows.forEach((row, i) => ui.row(`help-chips-${i}`, () => row.forEach((c, j) => { ui.column(`help-chip-${i}-${j}`, () => { ui.style("text").label(c.text); }, { style: "chip" }); }), { spacing: 9.6 }));
-  }, closeOverlay, (iw) => flow("help-done", [{ id: "btn-help-close", text: T("Close"), style: "btn-primary", act: closeOverlay }], iw, 9.6, false, "center"));
+  }, closeOverlay, (iw) => flow("help-done", [{ id: "btn-help-close", text: T("Close"), style: "btn-primary", act: closeOverlay }], iw, 9.6, "center"));
 }

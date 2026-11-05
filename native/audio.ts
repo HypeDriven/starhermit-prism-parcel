@@ -13,8 +13,8 @@
 // live synthesis graph makes clip loads fail on the web runtime): a clip
 // still loading is silent. Interface clicks play on the runtime's interface
 // bus. The runtime's Options own the volumes, the mute and the voice limit.
-// Clips load once the mixer runs (natively at once, in a browser after the
-// first press), one at a time.
+// Every clip loads at start; the pad and the music wait for the mixer (in a
+// browser, the first press).
 import { context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 import { Rules } from "./game.ts";
 
@@ -22,14 +22,15 @@ const SFX = ["ui-click", "ui-select", "invalid-thud", "place-frost-1", "place-fr
   "replenish-chime", "win-fanfare", "over-fall", "achievement-ping"] as const;
 type Sfx = (typeof SFX)[number];
 const clips = new Map<string, AudioClip>();
-const queue: string[] = [];
-let loading = false;
-let wantClips = false;
 let suspended = false;
 let rng = Rules.createRng(1234);
 
-/** Asks for the clips; they load once the mixer runs (see update). */
-export function loadSfx(): void { wantClips = true; }
+/** Loads every clip at once (onStart); a cue whose clip is still loading is silent. */
+export function loadSfx(): void {
+  for (const name of SFX) {
+    loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => console.warn(`sfx ${name}: ${e instanceof Error ? e.message : String(e)}`));
+  }
+}
 /** audio.js seedVariants: the placement variant stream follows the round's seed. */
 export function seedVariants(seed: number): void { rng = Rules.createRng((seed >>> 0) || 1); }
 
@@ -37,7 +38,7 @@ function sfx(name: Sfx, bus: Bus = "effects"): void {
   if (suspended) return;
   const clip = clips.get(name);
   if (!clip) return;
-  try { playClip(clip, { bus }); } catch { clips.delete(name); if (!queue.includes(name)) queue.push(name); }
+  try { playClip(clip, { bus }); } catch { /* the mixer is full this frame: skip it */ }
 }
 export const playClick = (): void => sfx("ui-click", "interface");
 export const playSelect = (): void => sfx("ui-select", "interface");
@@ -143,25 +144,9 @@ export function setSuspended(on: boolean): void {
   } catch { /* gone */ }
 }
 
-/** Each frame: the clips once the mixer runs (one at a time), then the pad and the music. */
+/** Each frame: once the mixer runs, the pad and the music. */
 export function update(): void {
   if (context.state !== "running") return;
-  if (wantClips) {
-    wantClips = false;
-    for (const n of SFX) if (!queue.includes(n)) queue.push(n);
-  }
-  if (!loading && queue.length) {
-    const name = queue.shift()!;
-    if (!clips.has(name)) {
-      loading = true;
-      loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); loading = false; }, (e: unknown) => {
-        console.warn(`sfx ${name}: ${e instanceof Error ? e.message : String(e)}`);
-        loading = false;
-      });
-    }
-    return;
-  }
-  if (loading) return;
   if (!comboClip) {
     try { comboClip = makeCombo(); } catch (e) { console.warn(`audio: ${String(e)}`); }
     return;

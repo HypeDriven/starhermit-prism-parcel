@@ -88,10 +88,11 @@ empty"), the screen-reader board and what play scripts click.
   lowered 3.5 m) at environment intensity 0.4; ACES at exposure 0.95. The camera fits the board (and the
   offer row when it shows: hidden in narrow portrait and frames under 520 px tall) into the band between
   the HUD and the tray, through the camera's view offset.
-- **Graphics levels** (native/quality.ts): the runtime's tier picks the old preset — Low (Lambert, no
-  shadows or post), Balanced (Standard, 1024 shadows, bloom, grade, FXAA, reflections, detail, motes), High
-  (clear-coated Physical, 2048 shadows, GTAO, SMAA), Ultra (4096 shadows, full GTAO, MSAA, full-resolution
-  bloom/AO); sparks and motes scale with the level. Render scale, adaptive resolution, frame-rate limit and
+- **Graphics levels** (native/quality.ts): shadows, AO, bloom, grade and AA come from the engine's
+  `levelSettings()` for the frame's level; the runtime's tier picks the old preset's art — Low (Lambert, no
+  shadows or post), Balanced (Standard, 1024 shadows, ½-res bloom, grade, FXAA, reflections, detail, motes), High
+  (clear-coated Physical, 2048 shadows, ½-res GTAO, SMAA), Ultra (4096 shadows, full GTAO, MSAA 4, full-resolution
+  bloom); sparks and motes scale with the level's particle budget (≤ 2×). Render scale, adaptive resolution, frame-rate limit and
   the readout are the runtime's.
 - **Themes:** Aurora, Ember, Frost, Meadow, Dusk recolour the dome, fog, lights, table, rim and motes; the
   colour-vision-safe palette swaps the six block hues.

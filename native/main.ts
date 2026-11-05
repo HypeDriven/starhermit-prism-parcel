@@ -17,7 +17,7 @@
 // Time is the runtime's fixed steps (60 a second): the round clock, the
 // short pause before the results and the Daily countdown run on it, so play
 // scripts replay exactly.
-import { clipboard, frame, onFixedUpdate, onPreferencesChange, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
+import { clipboard, frame, levelSettings, onFixedUpdate, onPreferencesChange, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
 import { onAction, onPointerButton, onPointerMove, onTouch, vibrate } from "starhermit:input";
 import * as ui from "starhermit:ui";
 import { onSessionEnded, requestSignIn } from "starhermit:platform";
@@ -591,7 +591,7 @@ function applyLook(): void {
   const k = `${f.quality}:${f.levelIndex}`;
   if (k === lookKey) return;
   lookKey = k;
-  render.applyLook(lookFor(f.quality, f.levelIndex));
+  render.applyLook(lookFor(levelSettings(f.level)));
 }
 function applyOptions(): void { render.setTheme(platform.options.theme, platform.options.cvdPalette); }
 onStart(() => {
