@@ -23,7 +23,7 @@ import * as ui from "starhermit:ui";
 import { onSessionEnded, requestSignIn } from "starhermit:platform";
 import { Content, Progress, Rules, type LoggedCommand, type RoundOptions, type State } from "./game.ts";
 import * as audio from "./audio.ts";
-import { S, T } from "./i18n.ts";
+import { T } from "./i18n.ts";
 import * as platform from "./platform.ts";
 import { lookFor } from "./quality.ts";
 import * as render from "./render.ts";
@@ -419,8 +419,8 @@ export function refreshDailyBoard(): void {
 export function leaderboardLine(): string | null {
   const r = results?.lb;
   if (!r) return null;
-  if (r === "posting") return S("lbPosting");
-  return !r.posted ? S("lbNotPosted") : r.rank ? S("lbRank", { rank: r.rank }) : S("lbPosted");
+  if (r === "posting") return T("starhermit.leaderboardPosting");
+  return !r.posted ? T("starhermit.leaderboardNotPosted") : r.rank ? T("starhermit.leaderboardRank", { rank: r.rank }) : T("starhermit.leaderboardPosted");
 }
 
 // ------------------------------------------------------------------ pause, settings, help
@@ -460,7 +460,7 @@ export function signIn(): void { void requestSignIn().catch(() => undefined); }
 export function copyInvite(): void {
   const link = platform.inviteLink();
   if (!link) return;
-  try { clipboard.writeText(link); app.note = () => S("inviteCopied"); } catch { app.note = () => S("inviteFailed", { link }); }
+  try { clipboard.writeText(link); app.note = () => T("starhermit.inviteCopied"); } catch { app.note = () => T("starhermit.inviteLink", { link }); }
 }
 
 // ------------------------------------------------------------------ keys and pads (main.js keydown + pollGamepad)
@@ -608,7 +608,7 @@ onStart(() => {
 onPreferencesChange((p) => render.setReducedMotion(p.reducedMotion));
 platform.onOptionsChange(() => applyOptions());
 platform.onProgressMerged(() => { if (app.screen === "title") announce(T("Progress restored from your StarHermit cloud save.")); });
-onSessionEnded(() => { app.note = () => S("signedOut"); });
+onSessionEnded(() => { app.note = () => T("starhermit.signedOut"); });
 onSuspend(() => {
   hidden = true;
   // Backgrounding pauses a round in progress and keeps its snapshot.

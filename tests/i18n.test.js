@@ -5,10 +5,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { STRINGS, EN } from '../src/strings.js';
 import { THEMES, themeInfo, DIFFICULTIES, DIFFICULTY_INFO, TUTORIAL_STEPS, ACHIEVEMENTS, MASTERY_TIERS } from '../src/content.js';
 import { PIECES } from '../src/rules.js';
 
+const STRINGS = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'));
+const EN = STRINGS['en-US'];
 const LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
 const dir = new URL('../native/', import.meta.url);
 const lit = /"((?:[^"\\]|\\.)*)"/.source;
@@ -29,6 +30,7 @@ export function usedKeys() {
   for (const m of MASTERY_TIERS) keys.add(m.name);
   for (const p of PIECES) keys.add(p.name);
   keys.delete('');
+  for (const k of [...keys]) if (k.startsWith('starhermit.')) keys.delete(k);
   return keys;
 }
 

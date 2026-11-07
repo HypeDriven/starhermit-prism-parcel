@@ -26,6 +26,7 @@ import {
   MeshLambertMaterial, MeshPhysicalMaterial, MeshStandardMaterial, NoColorSpace, PerspectiveCamera, PlaneGeometry, Plane, PMREMGenerator,
   OrthographicCamera, Points, PointsMaterial, Raycaster, RepeatWrapping, RingGeometry, RoomEnvironment, RoundedBoxGeometry, SRGBColorSpace, SphereGeometry,
   TextureLoader, Vector2, Vector3, renderer, scene, type Material, type Object3D, type Texture,
+  stopTweens, tween,
 } from "starhermit:scene";
 import { OffscreenCanvas } from "starhermit:canvas";
 import { Content, Rules, type Slot, type ThemeInfo } from "./game.ts";
@@ -147,9 +148,9 @@ let tableMat: MeshStandardMaterial | MeshLambertMaterial, plateMat: MeshStandard
 let rimMat: MeshStandardMaterial | MeshLambertMaterial, socketMat: MeshStandardMaterial | MeshLambertMaterial, cellMat: MeshStandardMaterial | MeshLambertMaterial;
 let boxGeo: BoxGeometry, roundGeo: BufferGeometry;
 let ghost: InstancedMesh, ghostMat: MeshBasicMaterial, cursor: Mesh;
+let pLive = false;
 let points: Points, pMat: PointsMaterial, motes: Points, motesMat: PointsMaterial;
 const flashes: Mesh[] = [];
-const flashLife: number[] = [];
 let offerGroup: Group;
 let offerViews: (Group | null)[] = [null, null, null];
 const offerMats: (MeshStandardMaterial | MeshLambertMaterial | null)[] = [null, null, null];
@@ -289,7 +290,6 @@ function build(): void {
     f.position.y = 0.12;
     f.visible = false;
     flashes.push(f);
-    flashLife.push(0);
     scene.add(f);
   }
   offerGroup = new Group();
@@ -452,9 +452,11 @@ export function animateClears(rows: number[], cols: number[], hueAt: (r: number,
     f.rotation.z = kind === "c" ? Math.PI / 2 : 0;
     f.position.x = kind === "c" ? cx(idx) : 0;
     f.position.z = kind === "r" ? cz(idx) : 0;
-    (f.material as MeshBasicMaterial).color.set(info.accent);
-    flashLife[i] = 0.45;
+    const fm = f.material as MeshBasicMaterial;
+    fm.color.set(info.accent);
+    fm.opacity = 0.55;
     f.visible = true;
+    tween(fm, { opacity: 0 }, { duration: 0.45, easing: "linear", onComplete: () => { f.visible = false; } });
   }
 }
 function burst(x: number, y: number, z: number, hue: number): void {
@@ -473,6 +475,7 @@ function burst(x: number, y: number, z: number, hue: number): void {
     pLife[k] = 0.6 + Math.random() * 0.3;
     pCol[k * 3] = color.r * boost; pCol[k * 3 + 1] = color.g * boost; pCol[k * 3 + 2] = color.b * boost;
   }
+  pLive = true;
   points.geometry.attributes.color!.needsUpdate = true;
 }
 export function shake(amount: number): void {
@@ -573,7 +576,7 @@ export function resetEffects(): void {
   pLife.fill(0);
   for (let k = 0; k < SPARK_MAX; k++) pPos[k * 3 + 1] = -100;
   points.geometry.attributes.position!.needsUpdate = true;
-  for (let i = 0; i < flashes.length; i++) { flashes[i]!.visible = false; flashLife[i] = 0; }
+  for (const f of flashes) { stopTweens(f.material as MeshBasicMaterial); f.visible = false; }
   shakeAmp = 0;
 }
 
@@ -690,9 +693,9 @@ export function update(dt: number): void {
   if (!built) return;
   dt = Math.min(0.05, dt);
   time += dt;
-  // sparks
+  // sparks (script: the ring of a burst has no emitter shape), nothing to do once the last has died
   let any = false;
-  for (let k = 0; k < pMax; k++) {
+  if (pLive) for (let k = 0; k < pMax; k++) {
     if (pLife[k]! <= 0) continue;
     any = true;
     pLife[k] = pLife[k]! - dt;
@@ -702,15 +705,8 @@ export function update(dt: number): void {
     pPos[k * 3 + 2] = pPos[k * 3 + 2]! + pVel[k * 3 + 2]! * dt;
     if (pLife[k]! <= 0) pPos[k * 3 + 1] = -100;
   }
+  pLive = any;
   if (any) points.geometry.attributes.position!.needsUpdate = true;
-  // flashes fade out
-  for (let i = 0; i < flashes.length; i++) {
-    const f = flashes[i]!;
-    if (!f.visible) continue;
-    flashLife[i] = flashLife[i]! - dt;
-    if (flashLife[i]! <= 0) { f.visible = false; continue; }
-    (f.material as MeshBasicMaterial).opacity = 0.55 * (flashLife[i]! / 0.45);
-  }
   // gentle ambient motion (off with reduced motion or a static background)
   if (look?.animated && !reducedMotion) {
     glowMat.opacity = 0.06 + 0.025 * Math.sin(time * 0.8);

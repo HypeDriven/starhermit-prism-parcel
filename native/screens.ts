@@ -17,7 +17,7 @@ import { bindings, requestRebind } from "starhermit:input";
 import * as draw from "starhermit:draw";
 import * as ui from "starhermit:ui";
 import { Content, Progress, Rules } from "./game.ts";
-import { N as key, S, T, plain } from "./i18n.ts";
+import { N as key, T, plain } from "./i18n.ts";
 import * as platform from "./platform.ts";
 import * as render from "./render.ts";
 import {
@@ -30,10 +30,8 @@ import { token } from "./style.ts";
 // ------------------------------------------------------------------ layout
 interface Layout { lw: number; lh: number; sc: number; wide: boolean; small: boolean; shortLand: boolean }
 function layoutNow(): Layout {
-  const f = frame();
-  const sc = ui.preferences().scale;
-  const sa = f.safeArea;
-  const lw = Math.max(1, (f.width - sa.left - sa.right) / sc), lh = Math.max(1, (f.height - sa.top - sa.bottom) / sc);
+  const v = ui.viewport!();
+  const sc = v.scale, lw = Math.max(1, v.width), lh = Math.max(1, v.height);
   return { lw, lh, sc, wide: lw >= 1024, small: lw <= 640, shortLand: lw > lh && lh <= 520 };
 }
 const lastSize = new Map<string, ui.Rect>();
@@ -374,8 +372,8 @@ function titleScreen(L: Layout): void {
       { id: "btn-help", text: T("Help & Rules"), act: openHelp },
       { id: "btn-settings", text: T("Settings"), act: openSettings },
     ];
-    if (platform.inviteLink()) items.push({ id: "btn-invite", text: S("invite"), act: copyInvite });
-    if (!platform.signedIn()) items.push({ id: "btn-signin", text: S("signIn"), act: signIn });
+    if (platform.inviteLink()) items.push({ id: "btn-invite", text: T("starhermit.invite"), act: copyInvite });
+    if (!platform.signedIn()) items.push({ id: "btn-signin", text: T("starhermit.signIn"), act: signIn });
     for (const b of items) button({ ...b, width: mw });
   }, { spacing: 9.6, width: mw, padding: { top: 16 } });
   const m = Progress.mastery(p);

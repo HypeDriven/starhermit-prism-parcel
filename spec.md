@@ -98,7 +98,7 @@ empty"), the screen-reader board and what play scripts click.
   colour-vision-safe palette swaps the six block hues.
 - **Sound** (native/audio.ts): the authored one-shots in sfx/ (click, select, invalid, three placement
   variants, single/multi clear, replenish, win, round over, achievement), the lesson chime, a quiet
-  ambience pad and an arpeggio music stem rendered once into looping clips on the music bus. Volumes,
+  ambience pad and an arpeggio music stem rendered at start on OfflineAudioContexts into looping clips on the music bus. Volumes,
   mute and the voice limit are the runtime's Options. Sound captions (an option) announce events.
 
 ## 6. Settings and accessibility
@@ -127,7 +127,7 @@ motion) are the runtime's Options, opened from Settings. Announcements go to scr
 
 ## 8. Code
 
-`src/` — rules.js, content.js, progress.js (save model), strings.js / i18n.js / platform-i18n.js (pure
+`src/` — rules.js, content.js, progress.js (save model) (pure
 ES modules shared with node tests and server.js). `native/` — main.ts (flow, input, commands, clock),
 screens.ts (starhermit:ui), render.ts (starhermit:scene), platform.ts, audio.ts, quality.ts, style.ts,
 i18n.ts, game.ts (typed facade). `tools/ui-style.css` → `assets/ui-style.json` (`npm run css`);
