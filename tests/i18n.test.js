@@ -10,7 +10,7 @@ import { PIECES } from '../src/rules.js';
 
 const STRINGS = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'));
 const EN = STRINGS['en-US'];
-const LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
+const LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT', 'fr-BE', 'de-BE', 'en-SG', 'en-HK', 'en-BQ', 'es-CO', 'de-IT', 'fr-IT', 'es-CL', 'es-AR', 'es-EC', 'ja-JP', 'nl-BE', 'zh-SG', 'ms-SG', 'ta-SG', 'zh-HK', 'yue-HK', 'nl-NL', 'fi-FI', 'sv-FI', 'et-EE', 'id-ID', 'vi-VN', 'de-BR', 'sl-IT', 'da-DE', 'ru-FI', 'ru-EE', 'lb-BE', 'co-FR', 'eu-FR', 'ca-FR', 'oc-FR', 'fur-IT', 'ca-IT', 'oc-IT', 'ca-ES', 'eu-ES', 'gl-ES', 'su-ID', 'bew-ID', 'km-VN'];
 const dir = new URL('../native/', import.meta.url);
 const lit = /"((?:[^"\\]|\\.)*)"/.source;
 
@@ -52,9 +52,9 @@ test('every used key exists in every translated locale with matching placeholder
   assert.deepEqual(missing, []);
 });
 
-test('nine locales; en-GB overrides only real keys; symbolic keys have en-US text', () => {
+test('nine locales; complete en-GB catalog uses canonical English keys; symbolic keys have en-US text', () => {
   assert.deepEqual(Object.keys(STRINGS).sort(), [...LOCALES].sort());
-  const keys = usedKeys();
-  for (const k of Object.keys(STRINGS['en-GB'])) assert.ok(keys.has(k), 'unknown en-GB key ' + k);
+  assert.deepEqual(Object.keys(STRINGS['en-GB']).sort(), Object.keys(EN).sort(),
+    'the complete British English catalog matches the canonical key set');
   for (const k of ['help.offer', 'help.clear', 'help.score', 'help.end', 'help.pointer', 'help.keyboard', 'help.gamepad']) assert.ok(EN[k], 'EN text for ' + k);
 });

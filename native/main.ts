@@ -1,3 +1,4 @@
+import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Prism Parcel on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
 // the engine's web runtime. The rules (src/rules.js), content (src/content.js)
@@ -625,7 +626,7 @@ onUpdate((dt) => {
   applyTokens(ui.preferences().highContrast);
   audio.update();
 });
-onRender(() => {
+onRender(__l10nRender(() => {
   hudRects.length = 0;
   const wasPlaying = playing();
   drawScreens();
@@ -636,4 +637,8 @@ onRender(() => {
     render.setCursor(round.cursor.row, round.cursor.col, showCursor);
   }
   render.update(frameDt);
-});
+}));
+
+// localization-runtime:menu
+import { installLanguageMenu as __installLanguageMenu } from "./l10n/menu.ts";
+__installLanguageMenu(false);
