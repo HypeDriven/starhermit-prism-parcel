@@ -120,7 +120,7 @@ function card(id: string, title: string, w: number, body: (inner: number) => voi
 }
 
 // ------------------------------------------------------------------ the frame
-export function drawScreens(): void {
+function drawScreensImmediate(): void {
   const L = layoutNow();
   const f = frame();
   if (app.screen) fullScreen(L);
@@ -633,4 +633,11 @@ function helpPanel(L: Layout): void {
     }
     rows.forEach((row, i) => ui.row(`help-chips-${i}`, () => row.forEach((c, j) => { ui.column(`help-chip-${i}-${j}`, () => { ui.style(__l10nStyle("text")).label(c.text); }, { style: "chip" }); }), { spacing: 9.6 }));
   }, closeOverlay, (iw) => flow("help-done", [{ id: "btn-help-close", text: T("Close"), style: "btn-primary", act: closeOverlay }], iw, 9.6, "center"));
+}
+
+export function drawScreens(): void {
+  if (!(app.overlay === "help")) { drawScreensImmediate(); return; }
+  const actions = ["cursor_up","cursor_down","cursor_left","cursor_right","slot_1","slot_2","slot_3","next_slot","place","clear","hint","undo","pause"];
+  const version = JSON.stringify([(app as any).settings ?? (app as any).options ?? {}, (platform as any).options ?? {}, actions.map((action) => bindings(action))]);
+  ui.retain!("help-screen", version, drawScreensImmediate);
 }

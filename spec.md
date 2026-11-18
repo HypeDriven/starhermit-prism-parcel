@@ -1,7 +1,7 @@
 # Prism Parcel — Game Specification
 
 **Genre:** spatial block puzzle · **Players:** 1 (asynchronous high-score board) ·
-**Runs on:** the StarHermit engine 1.39.0 (`engine.minor=39`), natively in the StarHermit client and in
+**Runs on:** the StarHermit engine 1.44.1 (`engine.minor=44`), natively in the StarHermit client and in
 browsers through the engine's web runtime (`index.html` is the engine's loader) ·
 **Locales:** en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT.
 
@@ -159,3 +159,9 @@ server (static files plus replay-validating daily endpoints) and is not part of 
 The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-SG`, `en-HK`, `en-BQ`, `es-CO`, `de-IT`, `fr-IT`, `es-CL`, `es-AR`, `es-EC`, `de-BR`. These reuse the corresponding existing translations in their language family. The runtime can resolve the exact regional tag. Language selection is available from the game’s Options panel or F2 and is saved per player in `ui.language`. Changes apply during play. Additional national, regional and indigenous language packs are only shipped once every English message has a translation with intact placeholders and markup. Complete additional language tables: `ja-JP`, `nl-BE`, `zh-SG`, `ms-SG`, `ta-SG`, `zh-HK`, `yue-HK`, `nl-NL`, `fi-FI`, `sv-FI`, `et-EE`, `id-ID`, `vi-VN`, `sl-IT`, `da-DE`, `ru-FI`, `ru-EE`, `lb-BE`, `co-FR`, `eu-FR`, `ca-FR`, `oc-FR`, `fur-IT`, `ca-IT`, `oc-IT`, `ca-ES`, `eu-ES`, `gl-ES`, `su-ID`, `bew-ID`, `km-VN`.
 
 <!-- regional-localization:end -->
+
+## Engine 1.44.1
+
+Browser play uses the WebGPU-only StarHermit 1.44.1 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+
+The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
