@@ -1,7 +1,7 @@
 # Prism Parcel — Game Specification
 
 **Genre:** spatial block puzzle · **Players:** 1 (asynchronous high-score board) ·
-**Runs on:** the StarHermit engine 1.44.1 (`engine.minor=44`), natively in the StarHermit client and in
+**Runs on:** the StarHermit engine 1.47.0 (`engine.minor=47`), natively in the StarHermit client and in
 browsers through the engine's web runtime (`index.html` is the engine's loader) ·
 **Locales:** en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT.
 
@@ -160,8 +160,12 @@ The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-S
 
 <!-- regional-localization:end -->
 
-## Engine 1.44.1
+## Engine 1.47.0
 
-Browser play uses the WebGPU-only StarHermit 1.44.1 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+Browser play uses the WebGPU-only StarHermit 1.47.0 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
 
 The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
+
+Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
+
+Higher graphics tiers use native per-object motion blur for moving pieces and effects. Camera motion stays sharp, lower tiers omit the effect, and the runtime's Motion blur and Reduce motion preferences remain authoritative.
