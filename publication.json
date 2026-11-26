@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T07:01:06.085895+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-26T15:18:06.179876+00:00",
+    "coverArtUpdatedAt": "2026-11-26T16:08:31.263824+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,7 +22,7 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-26T15:18:04.946344+00:00",
+      "deployedAt": "2026-11-26T16:08:31.251702+00:00",
       "externalLaunchUrl": null,
       "engineVersion": "1.50.0",
       "deployWarning": null
@@ -36,10 +36,10 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-26T15:18:05.395Z",
-  "sourceCommit": "6d9c72d15fe5763af85b6f1fb785b5e68b925d40",
+  "publishedAt": "2026-11-26T16:08:30.404Z",
+  "sourceCommit": "a8ed9072ebabb98c40a7c047a492ed81adffe7b0",
   "bytesReceived": 2120819,
-  "archiveSha256": "a679f8900baeb9fb106b6309ed3c383a4e31cf590caaaa47f61f9b84dbd20c2d",
+  "archiveSha256": "f6d205f32b6b8d2999ccf98a05fefe4e3ab5494ae3f151b7761e4d1f01801017",
   "indexSha256": "953395f040f9430c0f2c51ebad14ada2503ec0469e2f95457a223de6fe8ad7a9",
   "result": {
     "clientPublished": true,
