@@ -1,7 +1,7 @@
 # Prism Parcel — Game Specification
 
 **Genre:** spatial block puzzle · **Players:** 1 (asynchronous high-score board) ·
-**Runs on:** the StarHermit engine 1.47.0 (`engine.minor=47`), natively in the StarHermit client and in
+**Runs on:** the StarHermit engine 1.50.0 (`engine.minor=50`), natively in the StarHermit client and in
 browsers through the engine's web runtime (`index.html` is the engine's loader) ·
 **Locales:** en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT.
 
@@ -160,9 +160,9 @@ The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-S
 
 <!-- regional-localization:end -->
 
-## Engine 1.47.0
+## Engine 1.50.0
 
-Browser play uses the WebGPU-only StarHermit 1.47.0 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+Browser play uses the WebGPU-only StarHermit 1.50.0 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
 
 The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
 
