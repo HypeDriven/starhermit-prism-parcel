@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T07:01:06.085895+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-26T22:05:49.034123+00:00",
+    "coverArtUpdatedAt": "2026-11-27T17:07:23.567546+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-26T22:05:49.023233+00:00",
+      "deployedAt": "2026-11-27T17:07:23.556445+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.51.0",
+      "engineVersion": "1.53.0",
       "deployWarning": null
     },
     "description": "Fit block shapes onto a ten-by-ten grid and complete rows and columns to keep space for new pieces.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-26T22:05:49.391Z",
-  "sourceCommit": "be77a91205e2815d512bd0c9cfbf4985f4da40e4",
-  "bytesReceived": 2121319,
-  "archiveSha256": "fc4638ddb3160097846b890a97b08a995b9b670094962fb295086c700240e6d9",
+  "publishedAt": "2026-11-27T17:07:23.730Z",
+  "sourceCommit": "570e77967e70d13699faf1531cb6f294003abcec",
+  "bytesReceived": 2120824,
+  "archiveSha256": "d38dcacb6e1526f32b59af32a07f441d0af09338a26b5da795c499ce8ece6adf",
   "indexSha256": "953395f040f9430c0f2c51ebad14ada2503ec0469e2f95457a223de6fe8ad7a9",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 2121319,
+    "bytesReceived": 2120824,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.51.0",
+    "engineVersion": "1.53.0",
     "deployWarning": null
   },
   "liveVerification": {
